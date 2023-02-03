@@ -1,0 +1,16 @@
+{application, ocpp,
+ [{description, "Open Charge Point Protocol server and client application."},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, {ocpp, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    cowboy
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {licenses, ["Apache-2.0"]},
+  {links, []}
+ ]}.
