@@ -13,19 +13,38 @@
 
 -behaviour(gen_server).
 
--export([start_link/2]).
+-export([start_link/2, message/2]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3]).
 
--record(state, {name}).
+%-callback handle_ocpp_rpc(Action :: any() , State :: any()) -> {reply, Response, NewHandlerState}.
 
--spec start_link(StationName :: binary(),
-                 Options :: proplists:proplist()) -> gen_server:start_ret().
-start_link(StationName, Options) ->
-    gen_server:start_link(?MODULE, [StationName, Options], []).
+-record(state, {name :: binary(),
+                module :: module(),
+                handler_state :: any()}).
+
+-spec start_link(HandlerModule :: module(), StationName :: binary()) ->
+          gen_server:start_ret().
+start_link(HandlerModule, StationName) ->
+    gen_server:start_link(?MODULE, [HandlerModule, StationName], []).
+
+-spec message(Handler :: pid(), Message :: binary()) ->
+          {reply, Response :: binary()} | stop.
+message(Handler, Message) ->
+    gen_server:call(Handler, {message, Message}).
 
 init([StationName, _Options]) ->
     {ok, #state{name = StationName}}.
 
+handle_call({message, Message}, _From, State) ->
+    case ocpp_rpc:decode(Message) of
+        {ok, {Action, MessageId}} ->
+            {Response, NewState} = dispatch(Action, State),
+            {reply, {reply, Response, MessageId}, NewState};
+        {error, {Reason, MessageId}} ->
+            {reply, {reply, ocpp_rpc:callerror(Reason, MessageId)}, State};
+        {error, Reason} ->
+            {reply, {reply, ocpp_rpc:callerror(Reason, <<"-1">>)}, State}
+    end;
 handle_call(_Call, _From, _State) ->
     error('not implemented').
 
@@ -34,3 +53,11 @@ handle_cast(_Cast, _State) ->
 
 code_change(_OldVsn, _NewVsn, State) ->
     {ok, State}.
+
+dispatch(Action, #state{module = HandlerModule,
+                        handler_state = HandlerState} = State) ->
+    case HandlerModule:handle_ocpp_rpc(Action, HandlerState) of
+        %% For now we just use this pattern; however, more will be added.
+        {reply, Response, NewHandlerState} ->
+            {reply, Response, State#state{ handler_state = NewHandlerState}}
+    end.
