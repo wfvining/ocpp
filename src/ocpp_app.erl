@@ -1,7 +1,7 @@
-%%%-------------------------------------------------------------------
-%% @doc ocpp public API
-%% @end
-%%%-------------------------------------------------------------------
+%%% @doc ocpp application
+%%% @end
+%%%
+%%% Copyright (c) 2023 Will Vining <wfv@vining.dev>
 
 -module(ocpp_app).
 
@@ -10,12 +10,6 @@
 -export([start/2, stop/1]).
 
 start(_StartType, _StartArgs) ->
-    Dispatch = cowboy_router:compile(
-                 [{'_', [{"/ocpp/:csname", ocpp_websocket_handler, []}]}]),
-    {ok, _} = cowboy:start_clear(
-                ocppj,
-                [{port, 3443}],
-                #{env => #{dispatch => Dispatch}}),
     ocpp_sup:start_link().
 
 stop(_State) ->

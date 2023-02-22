@@ -2,7 +2,7 @@
  [{description, "Open Charge Point Protocol server and client application."},
   {vsn, "0.1.0"},
   {registered, []},
-  {mod, {ocpp, []}},
+  {mod, {ocpp_app, []}},
   {applications,
    [kernel,
     stdlib,

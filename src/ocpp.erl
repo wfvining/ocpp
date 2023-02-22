@@ -5,14 +5,7 @@
 
 -module(ocpp).
 
--behaviour(application).
-
-%% application callbacks
--export([start/2, stop/1]).
-%% API
 -export([start_ocpp_server/2]).
-
-%% API functions
 
 -spec start_ocpp_server(HandlerModule :: module(),
                         Options :: proplists:proplist()) ->
@@ -30,11 +23,3 @@ start_ocpp_server(HandlerModule, Options) ->
                 [{port, Port}],
                 #{env => #{dispatch => Dispatch}}),
     {ok, Server}.
-
-start(_StartType, _StartArgs) ->
-    ocpp_sup:start_link().
-
-stop(_State) ->
-    ok.
-
-%% internal functions
