@@ -37,8 +37,8 @@ init([StationName, _Options]) ->
 
 handle_call({message, Message}, _From, State) ->
     case ocpp_rpc:decode(Message) of
-        {ok, {Action, MessageId}} ->
-            {Response, NewState} = dispatch(Action, State),
+        {ok, {call, MessageId, Action}} ->
+            {reply, Response, NewState} = dispatch(Action, State),
             {reply, {reply, Response, MessageId}, NewState};
         {error, {Reason, MessageId}} ->
             {reply, {reply, ocpp_rpc:callerror(Reason, MessageId)}, State};

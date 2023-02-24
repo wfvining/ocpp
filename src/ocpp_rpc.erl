@@ -6,19 +6,25 @@
 
 -export([call/3, callerror/2, callresult/2, decode/1]).
 
--export_type([messagetype/0, rpc_error/0, constraint_violation/0]).
+-export_type([messagetype/0, rpcerror/0, constraint_violation/0,
+              request/0, response/0]).
 
 -type messagetype() :: call
                      | callresult
                      | callerror.
 
+%% TODO
+-type request() :: any().
+-type response() :: any().
+
 -type constraint_violation() :: occurence_violation
                               | property_violation
                               | type_violation.
 
--type rpc_error() :: format_violation  % Payload for Action is syntactically incorrect
-                   | generic_error     % a non-specific error
+-type rpcerror() :: format_violation
+                   | generic_error
                    | internal_error
+                   | message_type_not_supported
                    | not_implemented
                    | not_supported
                    | protocol_error
@@ -38,8 +44,8 @@
 call(MessageId, Action, Payload) ->
     encode_json([messagetype_to_id(call), MessageId, Action, Payload]).
 
-%% @doc Return an encoded OCPP CALLERROR message with the given error reason.
--spec callerror(Error :: rpc_error(), MessageId :: messageid()) -> binary().
+%% @doc Return an encoded RPC error message with the given error reason.
+-spec callerror(Error :: rpcerror(), MessageId :: messageid()) -> binary().
 callerror(Error, MessageId) ->
     CallError = make_callerror(Error, MessageId),
     encode_json(CallError).
@@ -58,15 +64,21 @@ make_callerror(Error, MessageId, ErrorDescription, ErrorDetails) ->
      ErrorDescription,
      ErrorDetails].
 
+-spec decode(MessageBinary :: binary()) ->
+          {ok, {messagetype(), messageid(), jiffy:json_value()}} |
+          {error, format_violation} |
+          {error, {message_type_not_supported, MessageTypeId :: integer()}} |
+          {error, {rpcerror(), MessageId :: messageid()}}.
 decode(MessageBinary) ->
-    %% TODO Validate the response with the message schemas
     try
         [MessageTypeId, MessageId | Rest] = jiffy:decode(MessageBinary),
-        %{ok, {id_to_messagetype(MessageTypeId), MessageId, Rest}},
-        MessageType = id_to_messagetype(MessageTypeId),
-        case validate(MessageType, Rest) of
-            {ok, Message} -> {ok, {MessageType, MessageId, Message}};
-            {error, _} = Error -> Error
+        case id_to_messagetype(MessageTypeId) of
+            {ok, MessageType} ->
+                case validate(MessageType, Rest) of
+                    {ok, Message} -> {ok, {MessageType, MessageId, Message}};
+                    {error, _} = Error -> Error
+                end;
+            {error, {message_type_not_supported, _}} = Error -> Error
         end
     catch
         error:_ ->
@@ -78,24 +90,28 @@ decode(MessageBinary) ->
 encode_json(RPCMessage) -> jiffy:encode(RPCMessage).
 
 validate(call, [Action, Payload]) ->
-    ocpp_schema:validate(Action, Payload).
+    case ocpp_schema:validate(Action, Payload) of
+        ok ->
+            {ok, {Action, Payload}};
+        {error, _} = Error -> Error
+    end.
 
 %%% Utility functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 messagetype_to_id(call) -> ?MESSAGE_TYPE_CALL;
 messagetype_to_id(callresult) -> ?MESSAGE_TYPE_RESULT;
-messagetype_to_id(callerror) -> ?MESSAGE_TYPE_ERROR;
-messagetype_to_id(_) -> error(not_supported).
+messagetype_to_id(callerror) -> ?MESSAGE_TYPE_ERROR.
 
-id_to_messagetype(?MESSAGE_TYPE_CALL) -> call;
-id_to_messagetype(?MESSAGE_TYPE_RESULT) -> callresult;
-id_to_messagetype(?MESSAGE_TYPE_ERROR) -> callerror;
-id_to_messagetype(_) -> error(not_supported).
+id_to_messagetype(?MESSAGE_TYPE_CALL) -> {ok, call};
+id_to_messagetype(?MESSAGE_TYPE_RESULT) -> {ok, callresult};
+id_to_messagetype(?MESSAGE_TYPE_ERROR) -> {ok, callerror};
+id_to_messagetype(MessageTypeId) -> {error, {message_type_not_supported, MessageTypeId}}.
 
 error_to_binary(format_violation) -> <<"FormatViolation">>;
 error_to_binary(generic_error) -> <<"GenericError">>;
 error_to_binary(internal_error) -> <<"InternalError">>;
 error_to_binary(not_implemented) -> <<"NotImplemented">>;
+error_to_binary(message_type_not_supported) -> <<"MessageTypeNotSupported">>;
 error_to_binary(not_supported) -> <<"NotSupported">>;
 error_to_binary(protocol_error) ->  <<"ProtocolError">>;
 error_to_binary(rpc_error) -> <<"RpcFrameworkError">>;

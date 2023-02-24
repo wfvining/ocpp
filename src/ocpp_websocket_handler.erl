@@ -24,7 +24,7 @@ init(Req, State) ->
                 true ->
                     Req1 = cowboy_req:set_resp_header(
                              <<"sec-websocket-protocol">>, <<"ocpp2.0.1">>, Req),
-                    {cowboy_websocket, Req1, cowboy_req:bindings(csname, Req)};
+                    {cowboy_websocket, Req1, cowboy_req:binding(csname, Req)};
                 false ->
                     {ok, cowboy_req:reply(400, Req), State}
             end

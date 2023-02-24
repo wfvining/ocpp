@@ -33,11 +33,11 @@ handle_continue({start_handler_sup, Supervisor, HandlerModule}, not_initialized)
                                   restart => permanent,
                                   type => supervisor,
                                   modules => [ocpp_handler_sup]}),
-    {ok, #state{handler_supervisor = HandlerSupervisor}}.
+    {noreply, #state{handler_supervisor = HandlerSupervisor}}.
 
 handle_call({start_handler, StationName}, _From, State) ->
     {ok, HandlerPid} = station_handler_sup:start_handler(
-                         #state.handler_supervisor, [StationName]),
+                         State#state.handler_supervisor, StationName),
     {reply, {ok, HandlerPid}, State}.
 
 handle_cast(_, _) ->

@@ -29,7 +29,7 @@ start_handler(StationName, Options) ->
 
 init([HandlerModule]) ->
     %% TODO start a server to manage the handlers and a handler supervisor
-    SupFlags = #{strategy => all_for_one,
+    SupFlags = #{strategy => one_for_all,
                  intensity => 3,
                  period => 1},
     ChildSpecs = [#{id => ocpp_server,

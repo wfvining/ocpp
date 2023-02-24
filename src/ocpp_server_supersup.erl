@@ -18,7 +18,7 @@
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
--spec start_ocpp_server(HandlerModule :: module()) -> {ok, pid()} | {error, any()}.
+-spec start_ocpp_server(HandlerModule :: module()) -> supervisor:startchild_ret().
 start_ocpp_server(HandlerModule) ->
     supervisor:start_child(?SERVER, [HandlerModule]).
 
