@@ -16,7 +16,8 @@
 -export([start_link/2, message/2]).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3]).
 
-%-callback handle_ocpp_rpc(Action :: any() , State :: any()) -> {reply, Response, NewHandlerState}.
+-callback handle_rpc(Request :: ocpp_rpc:request() , State :: any()) ->
+    {reply, Response :: ocpp_rpc:response(), NewHandlerState :: any()}.
 
 -record(state, {name :: binary(),
                 module :: module(),
@@ -56,7 +57,7 @@ code_change(_OldVsn, _NewVsn, State) ->
 
 dispatch(Action, #state{module = HandlerModule,
                         handler_state = HandlerState} = State) ->
-    case HandlerModule:handle_ocpp_rpc(Action, HandlerState) of
+    case HandlerModule:handle_rpc(Action, HandlerState) of
         %% For now we just use this pattern; however, more will be added.
         {reply, Response, NewHandlerState} ->
             {reply, Response, State#state{ handler_state = NewHandlerState}}
