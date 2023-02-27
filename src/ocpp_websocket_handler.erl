@@ -11,8 +11,6 @@
 
 -export([init/2, websocket_init/1, websocket_handle/2, websocket_info/2]).
 
--record(state, {cshandler :: pid(), server :: pid()}).
-
 init(Req, State) ->
     case cowboy_req:parse_header(<<"sec-websocket-protocol">>, Req) of
         undefined ->
@@ -48,23 +46,11 @@ init(Req, State) ->
             end
     end.
 
-websocket_init([Server, StationName]) ->
-    {ok, Handler} = ocpp_server:start_station_handler(Server, StationName),
-    %% TODO monitor the handler process and close the connection
-    %%      if an error occurs.
-    %% Ref = erlang:monitor(process, Handler),
-    {ok, #state{cshandler = Handler, server = Server}}.
+websocket_init(StationName) ->
+    error('not implemented').
 
 websocket_handle({text, Msg}, State) ->
-    case station_handler:message(State#state.cshandler, Msg) of
-        {reply, Response} ->
-            {reply, {text, Response}, State};
-        stop ->
-            {stop, State}
-        %% {error, Reason} ->
-        %%     %% TODO handle errors correctly according to the OCPP spec.
-        %%     {reply, }
-    end.
+    error('not implemented').
 
 websocket_info(_, State) ->
     {ok, State}.
