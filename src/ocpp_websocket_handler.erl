@@ -24,8 +24,26 @@ init(Req, State) ->
                 true ->
                     Req1 = cowboy_req:set_resp_header(
                              <<"sec-websocket-protocol">>, <<"ocpp2.0.1">>, Req),
+                    %% TODO
+                    %%
+                    %% "If the CSMS does not recognize the Charging
+                    %% Station identifier... it SHOULD send an HTTP
+                    %% response with status 404 and abort the
+                    %% WebSocket connection..."
+                    %%
+                    %% (OCPP 2.0.1: Part 4 § 3.2)
                     {cowboy_websocket, Req1, cowboy_req:binding(csname, Req)};
                 false ->
+                    %% TODO
+                    %%
+                    %% "If the CSMS does not agree to using one of the
+                    %% subprotocols offered by the client, it MUST
+                    %% complete the WebSocket handshake with a
+                    %% response without a Sec-WebSocket-Protocol
+                    %% header and then immediately close the WebSocket
+                    %% connection."
+                    %%
+                    %% (OCPP 2.0.1: Part 4 § 3.2)
                     {ok, cowboy_req:reply(400, Req), State}
             end
     end.
