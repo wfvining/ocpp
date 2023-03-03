@@ -12,6 +12,28 @@
 -export([init/2, websocket_init/1, websocket_handle/2, websocket_info/2]).
 
 init(Req, State) ->
+    CSName = cowboy_req:binding(csname, Req),
+    case ocpp_station_db:get_station(CSName) of
+        {ok, Station} ->
+            case authenticate(Req, ocpp_station_db:id(Station)) of
+                true ->
+                    init_authenticated(CSName, Req, State);
+                false ->
+                    {ok, cowboy_req:reply(401, Req), State}
+            end;
+        notfound ->
+            {ok, cowboy_req:reply(404, Req), State}
+    end.
+
+authenticate(Req, Station) ->
+    case cowboy_req:parse_header(<<"authorization">>, Req) of
+        {basic, Station, Password} ->
+            ocpp_authentication:verify(Station, Password);
+        {basic, _, _} -> false;
+        _ -> false
+    end.
+
+init_authenticated(StationName, Req, State) ->
     case cowboy_req:parse_header(<<"sec-websocket-protocol">>, Req) of
         undefined ->
             %% Websocket subprotocol must be specified (OCPP 2.0.1: Part 4 § 3.1.2)
@@ -30,7 +52,7 @@ init(Req, State) ->
                     %% WebSocket connection..."
                     %%
                     %% (OCPP 2.0.1: Part 4 § 3.2)
-                    {cowboy_websocket, Req1, cowboy_req:binding(csname, Req)};
+                    {cowboy_websocket, Req1, StationName};
                 false ->
                     %% TODO
                     %%
