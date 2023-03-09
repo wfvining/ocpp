@@ -21,16 +21,24 @@
                               | property_violation
                               | type_violation.
 
--type rpcerror() :: format_violation
-                   | generic_error
-                   | internal_error
-                   | message_type_not_supported
-                   | not_implemented
-                   | not_supported
-                   | protocol_error
-                   | rpc_error
-                   | security_error
-                   | constraint_violation().
+-type payload_error() :: format_violation %% payload for `Action' syntactically incorrect
+                       | generic_error
+                       | internal_error
+                       | not_implemented
+                       | not_supported
+                       | protocol_error
+                       | security_error
+                       | constraint_violation().
+
+-type framework_error() :: rpc_framework_error %% Not a valid RPC request
+                         | message_type_not_supported. %% Message type number not supported
+
+-type rpcerror() :: payload_error()
+                  | framework_error().
+
+-type decode_error() :: rpc_framework_error
+                      | {message_type_not_supported, MessageTypeId :: integer()}
+                      | {payload_error(), MessageId :: messageid()}.
 
 -type messageid() :: string() | binary().
 
@@ -114,7 +122,7 @@ error_to_binary(not_implemented) -> <<"NotImplemented">>;
 error_to_binary(message_type_not_supported) -> <<"MessageTypeNotSupported">>;
 error_to_binary(not_supported) -> <<"NotSupported">>;
 error_to_binary(protocol_error) ->  <<"ProtocolError">>;
-error_to_binary(rpc_error) -> <<"RpcFrameworkError">>;
+error_to_binary(rpc_framework_error) -> <<"RpcFrameworkError">>;
 error_to_binary(security_error) -> <<"SecurityError">>;
 error_to_binary(occurence_violation) -> <<"OccurenceConstraintViolation">>;
 error_to_binary(property_violation) -> <<"PropertyConstraintViolation">>;
