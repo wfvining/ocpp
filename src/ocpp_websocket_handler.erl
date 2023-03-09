@@ -63,8 +63,23 @@ init_authenticated(StationName, Req, State) ->
 websocket_init(StationName) ->
     error('not implemented').
 
-websocket_handle({text, Msg}, State) ->
-    error('not implemented').
+websocket_handle({text, Msg}, StationPid) ->
+    case ocpp_rpc:decode(Msg) of
+        {ok, Message} ->
+            Response = handle_message(Message, StationPid),
+            {reply, {text, Response}, StationPid};
+        {error, Error} ->
+            {reply, {text, ocpp_rpc:callerror(Error)}, StationPid}
+    end.
 
 websocket_info(_, State) ->
     {ok, State}.
+
+handle_message({call, MessageId, {Action, Payload}}, StationPid) ->
+    Request = ocpp_request:from_json(Action, Payload),
+    case ocpp_station:handle_rpc(StationPid, Request) of
+        {reply, Response} ->
+            {reply, {text, ocpp_rpc:callresult(MessageId, Response)}, StationPid};
+        {error, Reason} ->
+            {reply, {text, ocpp_rpc:callerror(Reason, MessageId)}, StationPid}
+    end.
