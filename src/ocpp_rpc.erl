@@ -73,10 +73,9 @@ make_callerror(Error, MessageId, ErrorDescription, ErrorDetails) ->
      ErrorDetails].
 
 -spec decode(MessageBinary :: binary()) ->
-          {ok, {messagetype(), messageid(), jiffy:json_value()}} |
-          {error, format_violation} |
-          {error, {message_type_not_supported, MessageTypeId :: integer()}} |
-          {error, {rpcerror(), MessageId :: messageid()}}.
+          {ok, {messagetype(), messageid(),
+                {Action :: binary(), Payload :: jiffy:json_value()}}} |
+          {error, decode_error()}.
 decode(MessageBinary) ->
     try
         [MessageTypeId, MessageId | Rest] = jiffy:decode(MessageBinary),
@@ -89,8 +88,13 @@ decode(MessageBinary) ->
             {error, {message_type_not_supported, _}} = Error -> Error
         end
     catch
+        %% XXX This is incorrect. We must differentiate between
+        %% syntactic errors in the RPC message (`rpc_framework_error')
+        %% and in the Action payload (`format_violation').
+        %%
+        %% TODO match the specific error expected from jiffy
         error:_ ->
-            {error, format_violation}
+            {error, rpc_framework_error}
     end.
 
 %%% Internal functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
