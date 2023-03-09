@@ -44,15 +44,7 @@ init_authenticated(StationName, Req, State) ->
                 true ->
                     Req1 = cowboy_req:set_resp_header(
                              <<"sec-websocket-protocol">>, <<"ocpp2.0.1">>, Req),
-                    %% TODO
-                    %%
-                    %% "If the CSMS does not recognize the Charging
-                    %% Station identifier... it SHOULD send an HTTP
-                    %% response with status 404 and abort the
-                    %% WebSocket connection..."
-                    %%
-                    %% (OCPP 2.0.1: Part 4 § 3.2)
-                    {cowboy_websocket, Req1, StationName};
+                    {cowboy_websocket, Req1, StationName, #{compress => true}};
                 false ->
                     %% TODO
                     %%
