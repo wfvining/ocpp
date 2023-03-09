@@ -4,7 +4,7 @@
 
 -module(ocpp_rpc).
 
--export([call/3, callerror/2, callresult/2, decode/1]).
+-export([call/3, callerror/1, callerror/2, callresult/2, decode/1]).
 
 -export_type([messagetype/0, rpcerror/0, constraint_violation/0,
               request/0, response/0]).
@@ -51,6 +51,20 @@
           {error, Reason :: any()}.
 call(MessageId, Action, Payload) ->
     encode_json([messagetype_to_id(call), MessageId, Action, Payload]).
+
+%% @doc Construct an ocpp callerror from an error value returned by `decode/1'.
+-spec callerror(Error :: decode_error()) -> binary().
+callerror(rpc_framework_error = Error) ->
+    callerror(Error, <<"-1">>);
+callerror({message_type_not_supported = Error, MessageType}) ->
+    make_callerror(
+      Error, <<"-1">>, <<"Message type not supported">>,
+      #{<<"MessageType">> => MessageType,
+        <<"SupportedMessageTypes">> => [messagetype_to_id(Type)
+                                        || Type <- [callerror, callresult, call]]});
+callerror({Error, MessageId}) ->
+    callerror(Error, MessageId).
+
 
 %% @doc Return an encoded RPC error message with the given error reason.
 -spec callerror(Error :: rpcerror(), MessageId :: messageid()) -> binary().
