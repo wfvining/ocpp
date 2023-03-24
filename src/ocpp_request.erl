@@ -30,14 +30,14 @@
 -type boot_notification() :: #{ reason := boot_reason(),
                                 charging_station := charging_station() }.
 
--type payload() :: boot_notification().
+-type message() :: boot_notification().
 
 -type action() :: boot_notification.
                 %% | transaction ... eventually this will include all requests.
 
--type request() :: {action(), payload()}.
+-type request() :: {action(), message()}.
 
-%% @doc construct a new request object from a decoded JSON value.
+%% @doc Construct a new request object from a decoded JSON value.
 -spec from_json(Action :: binary(), Payload :: #{binary() => Value})
                -> request() when Value :: binary()
                                         | number()
