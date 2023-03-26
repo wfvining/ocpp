@@ -3,9 +3,13 @@
 %%% Copyright (c) 2023 Will Vining <wfv@vining.dev>
 -module(ocpp_station_db).
 
--export([install/1, add_station/2, get_station/1, id/1]).
+-export([install/1, add_station/2, get_station/1, id/1, all_stations/0]).
+
+-export_type([station/0]).
 
 -record(charging_station, {id :: binary(), num_evse :: pos_integer()}).
+
+-opaque station() :: #charging_station{}.
 
 -define(OCPP_MAX_ID_LEN, 48).
 
@@ -32,3 +36,11 @@ get_station(Id) ->
 
 id(#charging_station{id=StationId}) ->
     StationId.
+
+%% @doc Return a list of all station IDs.
+-spec all_stations() -> [binary()].
+all_stations() ->
+    F = fun() -> mnesia:all_keys(charging_station) end,
+    case mnesia:transaction(F) of
+        {atomic, Stations} -> Stations
+    end.
