@@ -29,7 +29,11 @@ init([]) ->
     SupFlags = #{strategy => one_for_all,
                  intensity => 0,
                  period => 1},
-    ChildSpecs = [],
+    ChildSpecs = [#{id => ocpp_station_sup,
+                    start => {ocpp_station_sup, start_link, []},
+                    restart => permanent,
+                    type => supervisor,
+                    modules => [ocpp_station_sup]}],
     {ok, {SupFlags, ChildSpecs}}.
 
 %% internal functions
