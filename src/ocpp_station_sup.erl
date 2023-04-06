@@ -7,28 +7,26 @@
 
 -behaviour(supervisor).
 
--export([start_link/0]).
+-export([start_link/0, start_station/1]).
 -export([init/1]).
 
 -define(SERVER, ?MODULE).
 
--define(SPEC(Station),
-        #{id => Station,
-          start => {ocpp_station, start_link, [Station]},
-          %% Should not restart on normal termination because stations
-          %% may be removed.
-          restart => transient,
-          type => worker,
-          modules => [ocpp_station]}).
-
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
-init([]) ->
-    SupFlags = #{strategy => one_for_one,
-                 intensity => 1,
-                 period => 3},
-    {ok, {SupFlags, station_specs()}}.
+-spec start_station(StationName :: binary()) -> supervisor:startchild_ret().
+start_station(StationName) ->
+    supervisor:start_child(?SERVER, [StationName, self()]).
 
-station_specs() ->
-    [?SPEC(Station) || Station <- ocpp_station_db:all_stations()].
+init([]) ->
+    SupFlags = #{strategy => simple_one_for_one,
+                 intensity => 10,
+                 period => 3},
+    ChildSpec = #{id => station,
+                  start => {ocpp_station, start_link, []},
+                  %% don't want these to ever restart.
+                  restart => temporary,
+                  type => worker,
+                  modules => [ocpp_station]},
+    {ok, {SupFlags, [ChildSpec]}}.
