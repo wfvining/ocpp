@@ -2,46 +2,87 @@
 
 An implementation of the Open Charge Point Protocol. This is a
 prototype implementation of the websocket-based OCPP-j protocol,
-version 2.0.1. This application just manages exchange of OCPP messages;
-it does not provide an implementation of a CSMS.
+version 2.0.1.
 
-## Architecture
+# Architectural Notes
 
-The application can host multiple OCPP servers at different ports and
-URLs. Starting a new server is described below. The server uses
-`cowboy` to handle HTTP requests and websocket communication.
+## Quality Attributes
 
-### Starting a Server
+### Scalability
 
-To start an OCPP server the application provides the function
-`ocpp:start_ocpp_server/2` which takes a callback module and a list of
-options. The callback module must implement the `station_handler`
-behavior and is responsible for interaction between the OCPP server
-and the CSMS or other application. Options are used to specify the URL
-and port where the server is going to listen for connections. By
-default the server listens on port 3443 at `"/ocpp"`.
+The CSMS should be able to handle hundreds of thousands (and
+potentially millions of chargers). The White House estimates there are
+over 130,000 public chargers deployed in the US as of 2023 as well as
+over 3,000,000 vehicles. 1,000,000 managed chargers is a reasonable
+target for a nationwide charging network.
 
-```erlang
-{ok, NewServer} = ocpp:start_ocpp_server(
-                      my_station_handler,
-                      [{port, 8080}, {path, "/my/ocpp"}]).
-```
+On the other hand, the number of gas stations within a single company
+seems to be on the order of thousands; this would seem to imply that
+even a large charging network would only require management of at most
+of thousands of stations. Even under the assumption that there will be
+additional quasi-public charging stations (e.g. at apartments or
+offices) that increase the number of stations compared to gas
+stations—and the assumption that due to the longer charge time more
+charging stations will be required than gas stations—a charging
+network can realistically only be expected to manage at most tens of
+thousands of stations. Even nation wide there are only ~150,000 gas
+stations.
 
-Starts a server that listens at
-`http://host:8080/my/ocpp/<station-name>` for connections from charging stations.
+However, scalability with respect to concurrent charging sessions and
+interactions from customers without incurring high latency is very
+important.
 
-### The Station Handler Behavior
+### Performance
 
-A CSMS application provides a module implementing the
-`station_handler` behavior when starting a new OCPP server. This
-behavior has one required callback that is invoked for every valid
-OCPP-J RPC message.
+Low latency. Arbitrarily, my goal is to ensure that 99.999% of
+requests receive a response within one second.
 
-```erlang
--spec handle_rpc(Request :: ocpp_rpc:request(), State :: any()) ->
-    {reply, Response :: ocpp_rpc:response(), NewState :: any()}.
-```
+Additionally, the system should be expected to experience bursty use
+including potentially geographically correlated failures and sudden
+influx of restored connections and provisioning requests following
+power outages.
 
-## Build
+Usage under normal conditions may also be bursty with high load in the
+mornings and afternoons/evenings.
 
-    $ rebar3 compile
+_I'm not sure that "bursty" is the best word to describe this, but I
+can't think of a better one right now._
+
+### Availability
+
+The system must never stop. Requests should time out _rarely_.
+
+Additionally, while it is not a software attribute availability of the
+charging stations/EVSE is also very important. unavailable/faulted
+equipment should be identified and alerted rapidly. Wherever possible
+reboots should be scheduled during low use times. Energy delivery must
+not be impeded by the CSMS.
+
+### Security
+
+Important, duh. OCPP has done a substantial amount of work to ensure
+the security of the protocol, but there is still room for errors in
+the implementation (e.g. weak password hashes, or database
+vulnerabilities).
+
+There should be detection and mitigation of denial of service attacks.
+
+### Modifiability
+
+Modifiability must be provided primarily to account for expected
+updates and new versions of OCPP. At the other side the architecture
+should be designed for modifiability of the core CSMS functionality.
+
+### Interoperability
+
+The CSMS should be interoperable with OCPP 1.6 as well as 2.0.1 and
+any future versions. The main route to achieving this will be to
+separate the communication/protocol layer (consisting of a state
+machine modeling the station & enforcing OCPP requirements) from the
+core CSMS functionality which will be accessible via erlang message
+passing (i.e. OTP APIs).
+
+Additional interoperability requirements arise for the core CSMS to
+interact with arbitrary external services such as such as a
+distribution management system or a variety of user & management
+systems.
