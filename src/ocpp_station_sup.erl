@@ -7,28 +7,24 @@
 
 -behaviour(supervisor).
 
--export([start_link/0]).
+-export([start_link/2]).
 -export([init/1]).
 
--define(SERVER, ?MODULE).
+start_link(StationId, NumEVSE) ->
+    supervisor:start_link(?MODULE, {StationId, NumEVSE}).
 
--define(SPEC(Station),
-        #{id => Station,
-          start => {ocpp_station, start_link, [Station]},
-          %% Should not restart on normal termination because stations
-          %% may be removed.
-          restart => transient,
-          type => worker,
-          modules => [ocpp_station]}).
-
-start_link() ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
-
-init([]) ->
+init({StationId, NumEVSE}) ->
     SupFlags = #{strategy => one_for_one,
                  intensity => 1,
                  period => 3},
-    {ok, {SupFlags, station_specs()}}.
-
-station_specs() ->
-    [?SPEC(Station) || Station <- ocpp_station_db:all_stations()].
+    ChildSpecs = [#{id => evse_sup,
+                    start => {ocpp_evse_sup, start_link, [NumEVSE]},
+                    restart => permanent,
+                    type => supervisor,
+                    modules => [ocpp_evse_sup]},
+                  #{id => station,
+                    start => {ocpp_station, start_link, [StationId]},
+                    restart => permanent,
+                    type => supervisor,
+                    modules => [ocpp_station]}],
+    {ok, {SupFlags, ChildSpecs}}.
