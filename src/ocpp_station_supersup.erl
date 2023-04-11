@@ -19,7 +19,7 @@
           %% may be removed.
           restart => transient,
           type => supervisor,
-          modules => [station_sup_specs]}).
+          modules => [ocpp_station_sup]}).
 
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
@@ -28,8 +28,12 @@ init([]) ->
     SupFlags = #{strategy => one_for_all,
                  intensity => 1,
                  period => 3},
+    StationRegistry = #{id => station_registry,
+                        start => {ocpp_station_registry, start_link, []},
+                        type => worker,
+                        restart => permanent},
     StationSpecs = station_sup_specs(),
-    {ok, {SupFlags, StationSpecs}}.
+    {ok, {SupFlags, [StationRegistry|StationSpecs]}}.
 
 station_sup_specs() ->
     [?SPEC(StationId, NumEVSE)
