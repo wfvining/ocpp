@@ -7,14 +7,14 @@
 start_test_() ->
     {"When a station starts its id should be registered with the station registry",
      {setup,
-      start_station(),
+      fun start_station/0,
       fun stop_station/1,
       fun station_registered/1}}.
 
 stop_test_() ->
     {"When a station stops its id should be unregisterd.",
      {foreach,
-      start_station([trap_exit]),
+      fun start_station_trap_exit/0,
       fun stop_station/1,
       [fun normal_shutdown_unregister/1,
        fun abnormal_shutdown_unregister/1]}}.
@@ -22,23 +22,20 @@ stop_test_() ->
 duplicate_id_test_() ->
     {"It should be impossible to start a station with the same id as another",
      {setup,
-      start_station(),
+      fun start_station/0,
       fun stop_station/1,
       fun test_duplicate_station_id/1}}.
 
 %% setup/teardown
-start_station() ->
-    start_station([]).
+start_station_trap_exit() ->
+    process_flag(trap_exit, true),
+    start_station().
 
-start_station(Options) ->
-    fun() ->
-            process_flag(trap_exit,
-                         proplists:get_bool(trap_exit, Options)),
-            {ok, _StationRegistry} = ocpp_station_registry:start_link(),
-            {ok, StationPid} = ocpp_station:start_link(?STATION_ID),
-            StationPid = ocpp_station_registry:whereis_name(?STATION_ID),
-            #{stationid => ?STATION_ID, station => StationPid}
-    end.
+start_station() ->
+    {ok, _StationRegistry} = ocpp_station_registry:start_link(),
+    {ok, StationPid} = ocpp_station:start_link(?STATION_ID),
+    StationPid = ocpp_station_registry:whereis_name(?STATION_ID),
+    #{stationid => ?STATION_ID, station => StationPid}.
 
 stop_station(#{station := StationPid}) ->
     exit(StationPid, normal),
