@@ -26,6 +26,20 @@ duplicate_id_test_() ->
       fun stop_station/1,
       fun test_duplicate_station_id/1}}.
 
+connect_test_() ->
+    {"It should be possible for a single process to connect to a station.",
+     {setup,
+      fun start_station/0,
+      fun stop_station/1,
+      fun test_station_connect/1}}.
+
+reconnect_test_() ->
+    {"After a connection dies a new process can connect to a station.",
+     {setup,
+      fun start_station/0,
+      fun stop_station/1,
+      fun test_station_reconnect/1}}.
+
 %% setup/teardown
 start_station_trap_exit() ->
     process_flag(trap_exit, true),
@@ -68,3 +82,18 @@ test_duplicate_station_id(_State) ->
     ?_assertMatch(
        {error, {already_started, _}},
        ocpp_station:start_link(?STATION_ID)).
+
+test_station_connect(#{stationid := StationId}) ->
+    {inorder,
+     [?_assertEqual(ok, ocpp_station:connect(StationId, self())),
+      {spawn, ?_assertEqual({error, already_connected},
+                            ocpp_station:connect(StationId, self()))}]}.
+
+test_station_reconnect(#{stationid := StationId}) ->
+    {Pid, Ref}  = spawn_monitor(
+                    fun() ->
+                            ok = ocpp_station:connect(StationId, self())
+                    end),
+    %% Wait for the first process to exit.
+    receive {'DOWN', Ref, process, Pid, _} -> ok end,
+    ?_assertEqual(ok, ocpp_station:connect(StationId, self())).

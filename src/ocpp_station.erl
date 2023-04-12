@@ -25,8 +25,9 @@
          reset_accepted/3,
          reset_scheduled/3]).
 
--record(data, {stationid :: binary(),
-               evse :: [pid()]}).
+-record(data,
+        {stationid :: binary(),
+         connection = disconnected :: disconnected | {pid(), reference()}}).
 
 -spec start_link(Station :: binary()) -> gen_statem:start_ret().
 start_link(Station) ->
@@ -34,7 +35,7 @@ start_link(Station) ->
 
 %% @doc Notify the state machine that a station has connected.
 -spec connect(StationId :: binary(), ConnectionPid :: pid())
-             -> ok.
+             -> ok | {error, already_connected}.
 connect(StationId, ConnectionPid) ->
     gen_statem:call(?NAME(StationId), {connect, ConnectionPid}).
 
@@ -52,13 +53,19 @@ stop(StationId) ->
 callback_mode() -> state_functions.
 
 init(StationId) ->
-    {ok, disconnected, nil}.
+    {ok, disconnected, #data{stationid = StationId}}.
 
-disconnected(_, _, _) ->
-    error('not implemented').
+disconnected({call, From}, {connect, ConnectionPid}, Data) ->
+    {next_state, connected,
+     setup_connection(Data, ConnectionPid),
+     [{reply, From, ok}]}.
 
-connected(_, _, _) ->
-    error('not implemented').
+connected({call, From}, {connect, _}, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, already_connected}}]};
+connected(cast, disconnect, Data) ->
+    {next_state, disconnected, cleanup_connection(Data)};
+connected(EventType, Event, Data) ->
+    handle_event(EventType, Event, Data).
 
 booting(_, _, _) ->
     error('not implemented').
@@ -86,3 +93,14 @@ reset_scheduled(_, _, _) ->
 
 code_change(_OldVsn, _NewVsn, Data) ->
     {ok, Data}.
+
+handle_event(info, {'DOWN', Ref, process, Pid, _},
+             #data{connection = {Pid, Ref}}) ->
+    {keep_state_and_data, [{next_event, cast, disconnect}]}.
+
+setup_connection(Data, ConnectionPid) ->
+    Ref = monitor(process, ConnectionPid),
+    Data#data{connection = {ConnectionPid, Ref}}.
+
+cleanup_connection(Data) ->
+    Data#data{connection = disconnected}.
