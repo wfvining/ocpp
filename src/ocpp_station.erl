@@ -27,9 +27,7 @@
         {stationid :: binary(),
          connection = disconnected :: disconnected | {pid(), reference()},
          evse_sup :: pid(),
-         evse :: [pid()]}).
-
--include_lib("eunit/include/eunit.hrl").
+         evse = [] :: [pid()]}).
 
 -spec start_link(Station :: binary(), NumEVSE :: pos_integer()) -> gen_statem:start_ret().
 start_link(Station, NumEVSE) ->
