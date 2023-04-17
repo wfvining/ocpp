@@ -7,11 +7,9 @@
 
 -behaviour(gen_statem).
 
--export([start_link/1, stop/1, handle_rpc/2, connect/2]).
+-export([start_link/2, stop/1, handle_rpc/2, connect/2]).
 
--export([init/1, callback_mode/0, code_change/3]).
-
--define(NAME(StationId), {via, ocpp_station_registry, StationId}).
+-export([init/1, callback_mode/0, code_change/3, terminate/3]).
 
 %% State functions
 -export([disconnected/3,
@@ -27,34 +25,50 @@
 
 -record(data,
         {stationid :: binary(),
-         connection = disconnected :: disconnected | {pid(), reference()}}).
+         connection = disconnected :: disconnected | {pid(), reference()},
+         evse_sup :: pid(),
+         evse :: [pid()]}).
 
--spec start_link(Station :: binary()) -> gen_statem:start_ret().
-start_link(Station) ->
-    gen_statem:start_link(?NAME(Station), ?MODULE, Station, []).
+-include_lib("eunit/include/eunit.hrl").
+
+-spec start_link(Station :: binary(), NumEVSE :: pos_integer()) -> gen_statem:start_ret().
+start_link(Station, NumEVSE) ->
+    gen_statem:start_link(?MODULE, {Station, NumEVSE, self()}, []).
 
 %% @doc Notify the state machine that a station has connected.
--spec connect(StationId :: binary(), ConnectionPid :: pid())
+-spec connect(Station :: pid(), ConnectionPid :: pid())
              -> ok | {error, already_connected}.
-connect(StationId, ConnectionPid) ->
-    gen_statem:call(?NAME(StationId), {connect, ConnectionPid}).
+connect(Station, ConnectionPid) ->
+    gen_statem:call(Station, {connect, ConnectionPid}).
 
 %% @doc Handle an OCPP remote procedure call.
--spec handle_rpc(StationId :: binary(), Request :: ocpp_request:request()) ->
+-spec handle_rpc(Station :: pid(), Request :: ocpp_request:request()) ->
           {reply, Response :: map()} |
           {error, Reason :: ocpp_rpc:rpcerror()}.
-handle_rpc(StationId, Request) ->
-    gen_statem:call(?NAME(StationId), {rpccall, Request}).
+handle_rpc(Station, Request) ->
+   gen_statem:call(Station, {rpccall, Request}).
 
--spec stop(StationId :: binary()) -> ok.
-stop(StationId) ->
-    gen_statem:stop(?NAME(StationId)).
+-spec stop(Station :: pid()) -> ok.
+stop(Station) ->
+    gen_statem:stop(Station).
 
 callback_mode() -> state_functions.
 
-init(StationId) ->
-    {ok, disconnected, #data{stationid = StationId}}.
+init({StationId, NumEVSE, Sup}) ->
+    process_flag(trap_exit, true),
+    case ocpp_station_registry:register(StationId) of
+        ok ->
+            {ok, disconnected, #data{stationid = StationId},
+             [{next_event, internal, {init_evse, Sup, NumEVSE}}]};
+        {error, already_registered} ->
+            {stop, {already_registered,
+                    element(2, ocpp_station_registry:lookup_station(StationId))}}
+    end.
 
+disconnected(internal, {init_evse, Sup, NumEVSE}, Data) ->
+    {ok, EVSESup} = ocpp_station_sup:start_evse_sup(Sup),
+    EVSE = init_evse(EVSESup, NumEVSE),
+    {keep_state, Data#data{evse_sup = EVSESup, evse = EVSE}};
 disconnected({call, From}, {connect, ConnectionPid}, Data) ->
     {next_state, connected,
      setup_connection(Data, ConnectionPid),
@@ -94,6 +108,9 @@ reset_scheduled(_, _, _) ->
 code_change(_OldVsn, _NewVsn, Data) ->
     {ok, Data}.
 
+terminate(_Reason, _State, _Data) ->
+    ocpp_station_registry:unregister().
+
 handle_event(info, {'DOWN', Ref, process, Pid, _},
              #data{connection = {Pid, Ref}}) ->
     {keep_state_and_data, [{next_event, cast, disconnect}]}.
@@ -104,3 +121,8 @@ setup_connection(Data, ConnectionPid) ->
 
 cleanup_connection(Data) ->
     Data#data{connection = disconnected}.
+
+init_evse(_, 0) ->
+    [];
+init_evse(EVSESup, N) ->
+    [ocpp_evse_sup:start_evse(EVSESup, N)|init_evse(EVSESup, N - 1)].

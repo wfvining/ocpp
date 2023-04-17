@@ -1,74 +1,54 @@
 -module(ocpp_station_registry).
 
-%% API for process registration.
--export([register_name/2, unregister_name/1, whereis_name/1, send/2]).
--export([start_link/0, stop/0]).
--export([init/1, handle_call/3, handle_cast/2, code_change/3, handle_info/2]).
+-export([new/0, delete/0, register/1, unregister/0, lookup_station/1]).
 
--define(SERVER, ?MODULE).
+-spec new() -> ok.
+new() ->
+    ets:new(sid2pid, [set, public, named_table]),
+    ets:new(pid2sid, [set, public, named_table]),
+    ok.
 
--spec start_link() -> gen_server:start_ret().
-start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+delete() ->
+    ets:delete(sid2pid),
+    ets:delete(pid2sid).
 
--spec register_name(Name :: term(), Pid :: pid()) -> yes | no.
-register_name(Name, Pid) ->
-    gen_server:call(?SERVER, {register, Name, Pid}).
-
--spec unregister_name(Name :: term()) -> term().
-unregister_name(Name) ->
-    gen_server:call(?SERVER, {unregister, Name}).
-
--spec whereis_name(Name :: term()) -> pid() | undefined.
-whereis_name(Name) ->
-    try ets:lookup_element(?SERVER, Name, 2) of
-        Pid -> Pid
-    catch
-        error:badarg ->
-            undefined
+%% @doc Register the calling process as `StationId'
+-spec register(StationId :: binary()) -> ok | {error, already_registered}.
+register(StationId) when is_binary(StationId) ->
+    try
+        insert_new(sid2pid, {StationId, self()}),
+        insert_new(pid2sid, {self(), StationId})
+    catch error:already_registered ->
+            {error, already_registered}
     end.
 
--spec send(Name :: term(), Message :: term()) -> pid().
-send(Name, Message) ->
-    case whereis_name(Name) of
-        undefined ->
-            exit({badarg, {Name, Message}});
-        Pid ->
-            Pid ! Message,
-            Pid
+%% Raise an error if ets:insert_new/3 returns false.
+insert_new(Table, Tuple) ->
+    case ets:insert_new(Table, Tuple) of
+        true  -> ok;
+        false -> error(already_registered)
     end.
 
--spec stop() -> ok.
-stop() ->
-    gen_server:cast(?SERVER, stop).
+%% @doc Unregister the calling process, if it is registered.
+-spec unregister() -> ok.
+unregister() ->
+    case ets:lookup(pid2sid, self()) of
+        [{Pid, StationId}] ->
+            ets:delete(sid2pid, StationId),
+            ets:delete(pid2sid, Pid),
+            ok;
+        [] ->
+            ok
+    end.
 
-init([]) ->
-    TRef = ets:new(?SERVER, [protected, set, named_table]),
-    {ok, TRef}.
-
-handle_call({register, Name, Pid}, _From, TRef) ->
-    Ref = monitor(process, Pid),
-    Reply = case ets:insert_new(TRef, [{Name, Pid, Ref}, {Ref, Name}]) of
-                true  -> yes;
-                false ->
-                    demonitor(Ref),
-                    no
-            end,
-    {reply, Reply, TRef};
-handle_call({unregister, Name}, _From, TRef) ->
-    Ref = ets:lookup_element(TRef, Name, 3),
-    demonitor(Ref),
-    ets:delete(TRef, Name),
-    {reply, ok, TRef}.
-
-handle_info({'DOWN', Ref, process, _Pid, _}, TRef) ->
-    Name = ets:lookup_element(TRef, Ref, 2),
-    ets:delete(TRef, Name),
-    ets:delete(TRef, Ref),
-    {noreply, TRef}.
-
-handle_cast(stop, TRef) ->
-    {stop, normal, TRef}.
-
-code_change(_, _, TRef) ->
-    {ok, TRef}.
+%% @doc Return the Pid registered for `StationId'.
+-spec lookup_station(StationId :: binary()) ->
+          {ok, pid()} |
+          {error, unregistered}.
+lookup_station(StationId) ->
+    case ets:lookup(sid2pid, StationId) of
+        [{StationId, Pid}] ->
+            {ok, Pid};
+        [] ->
+            {error, unregistered}
+    end.

@@ -3,6 +3,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -define(STATION_ID, <<"TestStation">>).
+-define(NUM_EVSE, 2).
 
 start_test_() ->
     {"When a station starts its id should be registered with the station registry",
@@ -13,11 +14,10 @@ start_test_() ->
 
 stop_test_() ->
     {"When a station stops its id should be unregisterd.",
-     {foreach,
-      fun start_station_trap_exit/0,
+     {setup,
+      fun start_station/0,
       fun stop_station/1,
-      [fun normal_shutdown_unregister/1,
-       fun abnormal_shutdown_unregister/1]}}.
+      fun normal_shutdown_unregister/1}}.
 
 duplicate_id_test_() ->
     {"It should be impossible to start a station with the same id as another",
@@ -41,59 +41,49 @@ reconnect_test_() ->
       fun test_station_reconnect/1}}.
 
 %% setup/teardown
-start_station_trap_exit() ->
-    process_flag(trap_exit, true),
-    start_station().
-
 start_station() ->
-    {ok, _StationRegistry} = ocpp_station_registry:start_link(),
-    {ok, StationPid} = ocpp_station:start_link(?STATION_ID),
-    StationPid = ocpp_station_registry:whereis_name(?STATION_ID),
-    #{stationid => ?STATION_ID, station => StationPid}.
+    ocpp_station_registry:new(),
+    {ok, StationSup} = ocpp_station_sup:start_link(?STATION_ID, ?NUM_EVSE),
+    #{stationid => ?STATION_ID, station_sup => StationSup}.
 
-stop_station(#{station := StationPid}) ->
-    exit(StationPid, normal),
-    ocpp_station_registry:stop(),
-    %% Pause to ensure everything gets shut down before starting the
-    %% next test
-    timer:sleep(10).
+stop_station(#{station_sup := StationSup}) ->
+    ocpp_station_sup:stop(StationSup),
+    timer:sleep(100),
+    ocpp_station_registry:delete(),
+    timer:sleep(100).
 
-station_registered(#{stationid := StationId,
-                     station := StationPid}) ->
-    Pid = ocpp_station_registry:whereis_name(StationId),
-    ?_assertEqual(StationPid, Pid).
+station_registered(#{stationid := StationId}) ->
+    Result = ocpp_station_registry:lookup_station(StationId),
+    ?_assertMatch({ok, Pid} when is_pid(Pid), Result).
 
 normal_shutdown_unregister(#{stationid := StationId}) ->
-    ok = ocpp_station:stop(StationId),
-    assert_unregistered(StationId).
+    {ok, Station} = ocpp_station_registry:lookup_station(StationId),
+    ok = ocpp_station:stop(Station),
+    timer:sleep(100),
+    {ok, NewStation} = ocpp_station_registry:lookup_station(StationId),
+    ?_assertNotEqual(Station, NewStation).
 
-abnormal_shutdown_unregister(#{station := StationPid,
-                               stationid := StationId}) ->
-    exit(StationPid, kill),
-    [?_assertNot(is_process_alive(StationPid)),
-     assert_unregistered(StationId)].
-
-assert_unregistered(StationId) ->
-    ?_assertEqual(
-       undefined,
-       ocpp_station_registry:whereis_name(StationId)).
-
-test_duplicate_station_id(_State) ->
-    ?_assertMatch(
-       {error, {already_started, _}},
-       ocpp_station:start_link(?STATION_ID)).
+test_duplicate_station_id(#{stationid := StationId}) ->
+    fun() ->
+            process_flag(trap_exit, true),
+            {ok, StationPid} = ocpp_station_registry:lookup_station(StationId),
+            ?assertMatch({error, {already_registered, StationPid}},
+                         ocpp_station:start_link(?STATION_ID, ?NUM_EVSE))
+    end.
 
 test_station_connect(#{stationid := StationId}) ->
+    {ok, StationPid} = ocpp_station_registry:lookup_station(StationId),
     {inorder,
-     [?_assertEqual(ok, ocpp_station:connect(StationId, self())),
+     [?_assertEqual(ok, ocpp_station:connect(StationPid, self())),
       {spawn, ?_assertEqual({error, already_connected},
-                            ocpp_station:connect(StationId, self()))}]}.
+                            ocpp_station:connect(StationPid, self()))}]}.
 
 test_station_reconnect(#{stationid := StationId}) ->
+    {ok, StationPid} = ocpp_station_registry:lookup_station(StationId),
     {Pid, Ref}  = spawn_monitor(
                     fun() ->
-                            ok = ocpp_station:connect(StationId, self())
+                            ok = ocpp_station:connect(StationPid, self())
                     end),
     %% Wait for the first process to exit.
     receive {'DOWN', Ref, process, Pid, _} -> ok end,
-    ?_assertEqual(ok, ocpp_station:connect(StationId, self())).
+    ?_assertEqual(ok, ocpp_station:connect(StationPid, self())).

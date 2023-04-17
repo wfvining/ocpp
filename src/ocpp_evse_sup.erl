@@ -8,24 +8,25 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/1]).
+-export([start_link/0, start_evse/2]).
 
 %% Supervisor callbacks
 -export([init/1]).
 
--define(EVSE_SPEC(EVSEId),
-        #{id => {evse, EVSEId},
-          start => {ocpp_evse, start_link, [EVSEId]},
-          restart => permanent,
-          type => worker,
-          modules => [ocpp_evse]}).
+start_link() ->
+    supervisor:start_link(?MODULE, []).
 
-start_link(NumEVSE) ->
-    supervisor:start_link(?MODULE, NumEVSE).
-
-init(NumEVSE) ->
-    SupFlags = #{strategy => one_for_one,
+init([]) ->
+    SupFlags = #{strategy => simple_one_for_one,
                  intensity => 1,
-                 period => 5},
-    Children = [?EVSE_SPEC(EVSEId) || EVSEId <- lists:seq(1, NumEVSE)],
-    {ok, {SupFlags, Children}}.
+                 period => 3600},
+    {ok, {SupFlags, [#{id => evse,
+                       start => {ocpp_evse, start_link, []},
+                       restart => transient,
+                       type => worker,
+                       modules => [ocpp_evse]}]}}.
+
+-spec start_evse(EVSESupervisor :: pid(),
+                 EVSEId :: pos_integer()) -> {ok, pid()}.
+start_evse(EVSESupervisor, EVSEId) ->
+    supervisor:start_child(EVSESupervisor, [EVSEId]).
