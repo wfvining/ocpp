@@ -7,7 +7,7 @@
 
 -behaviour(gen_statem).
 
--export([start_link/2, stop/1, handle_rpc/2, connect/2]).
+-export([start_link/2, stop/1, handle_rpc/2, connect/2, lookup/1]).
 
 -export([init/1, callback_mode/0, code_change/3, terminate/3]).
 
@@ -51,6 +51,21 @@ handle_rpc(Station, Request) ->
 -spec stop(Station :: pid()) -> ok.
 stop(Station) ->
     gen_statem:stop(Station).
+
+%% @doc
+%% Lookup the Pid corresponding to the `StationId'. If `StationId' is
+%% not a station that is currently running then the call fails with
+%% reason `badarg'.
+%% @end
+-spec lookup(StationId :: binary()) -> pid().
+lookup(StationId) ->
+    case ocpp_station_registry:lookup_station(StationId) of
+        {ok, Pid} ->
+            Pid;
+        {error, unregistered} ->
+            error(badarg, [StationId])
+    end.
+
 
 callback_mode() -> state_functions.
 

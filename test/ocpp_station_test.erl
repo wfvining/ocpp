@@ -47,39 +47,40 @@ start_station() ->
     #{stationid => ?STATION_ID, station_sup => StationSup}.
 
 stop_station(#{station_sup := StationSup}) ->
+    process_flag(trap_exit, true),
     ocpp_station_sup:stop(StationSup),
     timer:sleep(100),
     ocpp_station_registry:delete(),
     timer:sleep(100).
 
 station_registered(#{stationid := StationId}) ->
-    Result = ocpp_station_registry:lookup_station(StationId),
-    ?_assertMatch({ok, Pid} when is_pid(Pid), Result).
+    Pid = ocpp_station:lookup(StationId),
+    ?_assert(is_pid(Pid)).
 
 normal_shutdown_unregister(#{stationid := StationId}) ->
-    {ok, Station} = ocpp_station_registry:lookup_station(StationId),
+    Station = ocpp_station:lookup(StationId),
     ok = ocpp_station:stop(Station),
     timer:sleep(100),
-    {ok, NewStation} = ocpp_station_registry:lookup_station(StationId),
+    NewStation = ocpp_station:lookup(StationId),
     ?_assertNotEqual(Station, NewStation).
 
 test_duplicate_station_id(#{stationid := StationId}) ->
     fun() ->
             process_flag(trap_exit, true),
-            {ok, StationPid} = ocpp_station_registry:lookup_station(StationId),
+            StationPid = ocpp_station:lookup(StationId),
             ?assertMatch({error, {already_registered, StationPid}},
                          ocpp_station:start_link(?STATION_ID, ?NUM_EVSE))
     end.
 
 test_station_connect(#{stationid := StationId}) ->
-    {ok, StationPid} = ocpp_station_registry:lookup_station(StationId),
+    StationPid = ocpp_station:lookup(StationId),
     {inorder,
      [?_assertEqual(ok, ocpp_station:connect(StationPid, self())),
       {spawn, ?_assertEqual({error, already_connected},
                             ocpp_station:connect(StationPid, self()))}]}.
 
 test_station_reconnect(#{stationid := StationId}) ->
-    {ok, StationPid} = ocpp_station_registry:lookup_station(StationId),
+    StationPid = ocpp_station:lookup(StationId),
     {Pid, Ref}  = spawn_monitor(
                     fun() ->
                             ok = ocpp_station:connect(StationPid, self())
