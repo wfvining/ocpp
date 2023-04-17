@@ -75,16 +75,16 @@ test_duplicate_station_id(#{stationid := StationId}) ->
 test_station_connect(#{stationid := StationId}) ->
     StationPid = ocpp_station:lookup(StationId),
     {inorder,
-     [?_assertEqual(ok, ocpp_station:connect(StationPid, self())),
+     [?_assertEqual(ok, ocpp_station:connect(StationPid)),
       {spawn, ?_assertEqual({error, already_connected},
-                            ocpp_station:connect(StationPid, self()))}]}.
+                            ocpp_station:connect(StationPid))}]}.
 
 test_station_reconnect(#{stationid := StationId}) ->
     StationPid = ocpp_station:lookup(StationId),
     {Pid, Ref}  = spawn_monitor(
                     fun() ->
-                            ok = ocpp_station:connect(StationPid, self())
+                            ok = ocpp_station:connect(StationPid)
                     end),
     %% Wait for the first process to exit.
     receive {'DOWN', Ref, process, Pid, _} -> ok end,
-    ?_assertEqual(ok, ocpp_station:connect(StationPid, self())).
+    ?_assertEqual(ok, ocpp_station:connect(StationPid)).

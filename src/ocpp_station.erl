@@ -7,7 +7,7 @@
 
 -behaviour(gen_statem).
 
--export([start_link/2, stop/1, handle_rpc/2, connect/2, lookup/1]).
+-export([start_link/2, stop/1, handle_rpc/2, connect/1, lookup/1]).
 
 -export([init/1, callback_mode/0, code_change/3, terminate/3]).
 
@@ -35,11 +35,14 @@
 start_link(Station, NumEVSE) ->
     gen_statem:start_link(?MODULE, {Station, NumEVSE, self()}, []).
 
-%% @doc Notify the state machine that a station has connected.
--spec connect(Station :: pid(), ConnectionPid :: pid())
+%% @doc
+%% Connect the calling process to the station. Called by the process
+%% responsible for comminication with the physical charging station.
+%% @end
+-spec connect(Station :: pid())
              -> ok | {error, already_connected}.
-connect(Station, ConnectionPid) ->
-    gen_statem:call(Station, {connect, ConnectionPid}).
+connect(Station) ->
+    gen_statem:call(Station, {connect, self()}).
 
 %% @doc Handle an OCPP remote procedure call.
 -spec handle_rpc(Station :: pid(), Request :: ocpp_request:request()) ->
