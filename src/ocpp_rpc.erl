@@ -15,7 +15,7 @@
 
 -type message() :: {rpctype(), messageid(), ocpp_message:message()}.
 
--type constraint_violation() :: occurence_violation
+-type constraint_violation() :: occurrence_violation
                               | property_violation
                               | type_violation.
 
@@ -176,6 +176,6 @@ error_to_binary(not_supported) -> <<"NotSupported">>;
 error_to_binary(protocol_error) ->  <<"ProtocolError">>;
 error_to_binary(rpc_framework_error) -> <<"RpcFrameworkError">>;
 error_to_binary(security_error) -> <<"SecurityError">>;
-error_to_binary(occurence_violation) -> <<"OccurenceConstraintViolation">>;
+error_to_binary(occurrence_violation) -> <<"OccurrenceConstraintViolation">>;
 error_to_binary(property_violation) -> <<"PropertyConstraintViolation">>;
 error_to_binary(type_violation) -> <<"TypeConstraintViolation">>.
