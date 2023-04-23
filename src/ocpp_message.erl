@@ -39,7 +39,7 @@ request(Action, Payload) ->
 -spec response(Action :: action(), Payload :: map()) -> message().
 response(Action, Payload) ->
     case ocpp_schema:validate(<<Action/binary, "Response">>, Payload) of
-        {ok, _Payload} ->
+        ok ->
             {response, Action, Payload};
         {error, Reason} ->
             error(Reason)
