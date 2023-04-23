@@ -13,8 +13,11 @@ init_schemas(SchemaDir) ->
           ok |
           {error, Reason :: any()}.
 validate(ActionName, Payload) ->
-    Schema = binary_to_list(ActionName),
-    case jesse:validate(Schema, Payload) of
+    SchemaURN = schema_urn(ActionName),
+    case jesse:validate(SchemaURN, Payload) of
         {ok, _} -> ok;
         Error -> Error
     end.
+
+schema_urn(Action) ->
+    "urn:OCPP:Cp:2:2020:3:" ++ binary_to_list(Action).
