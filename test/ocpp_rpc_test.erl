@@ -6,6 +6,7 @@
 -define(BOOT_NOTIFICATION_REQUEST,
         "{\"reason\": \"PowerUp\", \"chargingStation\": "
         "{\"model\": \"testModel\", \"vendor\": \"testVendor\"}}").
+-define(MESSAGE_ID, atom_to_binary(?FUNCTION_NAME)).
 
 decode_framework_error_test_() ->
     {"Invalid RPC messages result in a framework_error",
@@ -31,6 +32,109 @@ message_id_test() ->
               " \"BootNotification\",",
               ?BOOT_NOTIFICATION_REQUEST, "]">>))]}}.
 
+unknown_message_type_test_() ->
+    {"decoding a message with type ID other than 2, 3, 4 "
+     "results in a message_type_not_supported error",
+     {inparallel,
+      [?_assertEqual(
+          {error, {message_type_not_supported, 1}},
+          ocpp_rpc:decode(<<"[1, true, false]">>)),
+       ?_assertEqual(
+          {error, {message_type_not_supported, -1}},
+          ocpp_rpc:decode(<<"[-1]">>)),
+       ?_assertEqual(
+          {error, {message_type_not_supported, 5}},
+          ocpp_rpc:decode(<<"[5, \"testid\", \"foo\", {}]">>))]}}.
+
+bad_ocpp_message_test_() ->
+    MessageID = atom_to_binary(?FUNCTION_NAME),
+    {"decoding a syntactically incorrect OCPP message "
+     "results in a protocol_error",
+     {setup, fun init_schemas/0, fun(_) -> ok end,
+      {inparallel,
+       [?_assertEqual(
+           {error, {protocol_error, MessageID}},
+           ocpp_rpc:decode(
+             <<"[2, ",
+               "\"", MessageID/binary, "\", ",
+               "\"BootNotification\", ",
+               Payload/binary, "]">>))
+        || Payload <- [<<"\"string\"">>, <<"[1, 2, {}]">>, <<"1">>,
+                       <<"true">>, <<"null">>, <<"1.5">>]]}}}.
+
+missing_property_test_() ->
+    MessageID = ?MESSAGE_ID,
+    {"decoding a rpccall with a payload missing required properties "
+     "results in an occurrence_violation",
+     {setup, fun init_schemas/0, fun(_) -> ok end,
+      [?_assertEqual(
+          {error, {occurrence_violation, ?MESSAGE_ID}},
+          ocpp_rpc:decode(
+            <<"[2, \"", MessageID/binary, "\", "
+              "\"BootNotification\", {\"reason\": \"PowerUp\"}]">>))]}}.
+
+extra_property_test_() ->
+    MessageID = ?MESSAGE_ID,
+    {"decoding a rpccall with a payload containing extra properties "
+     "results in an occurrence_violation",
+     {setup, fun init_schemas/0, fun(_) -> ok end,
+      [?_assertEqual(
+          {error, {occurrence_violation, ?MESSAGE_ID}},
+          ocpp_rpc:decode(
+            <<"[2, \"", MessageID/binary, "\", "
+              "\"BootNotification\", "
+              "{\"reason\": \"PowerUp\", "
+              "\"chargingStation\": "
+              "{\"model\": \"foo\", \"vendorName\": \"bar\"}, "
+              "\"extra\": 2}]">>))]}}.
+
+bad_property_test_() ->
+    MessageID = ?MESSAGE_ID,
+    {"decoding an rpccall with a payload containing a property with an "
+     "invalid value results in a property_violation",
+     {setup, fun init_schemas/0, fun(_) -> ok end,
+      [?_assertEqual(
+          {error, {property_violation, ?MESSAGE_ID}},
+          ocpp_rpc:decode(
+            <<"[2, \"", MessageID/binary, "\", "
+              "\"BootNotification\", "
+              "{\"reason\": \"PowerUp\", "
+              "\"chargingStation\": "
+              "{\"model\": \"foo\", \"vendorName\": "
+              "\"abcdefghijklmnopqrstuvwxyz01234567890-too_long-"
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]">>))]}}.
+
+bad_type_test_() ->
+    MessageID = ?MESSAGE_ID,
+    {"invalid enum results in a type_violation",
+     {setup, fun init_schemas/0, fun(_) -> ok end,
+      [?_assertEqual(
+          {error, {type_violation, ?MESSAGE_ID}},
+          ocpp_rpc:decode(
+            <<"[2, \"", MessageID/binary, "\", "
+              "\"BootNotification\", "
+              "{\"reason\": \"PowerDown\", "
+              "\"chargingStation\": "
+              "{\"model\": \"foo\", \"vendorName\": \"bar\"}}]">>)),
+       ?_assertEqual(
+          {error, {type_violation, ?MESSAGE_ID}},
+          ocpp_rpc:decode(
+            <<"[2, \"", MessageID/binary, "\", "
+              "\"BootNotification\", "
+              "{\"reason\": \"PowerUp\", "
+              "\"chargingStation\": \"notastring\"}]">>))]}}.
+
+unknown_action_test_() ->
+    MessageID = ?MESSAGE_ID,
+    {"decoding a request with an unknown action "
+     "results in a not_implemented error",
+     {setup, fun init_schemas/0, fun(_) -> ok end,
+      ?_assertEqual(
+         {error, {not_implemented, MessageID}},
+         ocpp_rpc:decode(
+           <<"[2, \"", MessageID/binary, "\", ",
+             "\"NoSuchAction\", {}]">>))}}.
+
 init_schemas() ->
     ocpp_schema:init_schemas(
       filename:join(code:priv_dir(ocpp), "json_schemas")).
@@ -38,6 +142,7 @@ init_schemas() ->
 bad_json() ->
     [?_assertEqual(
         ?FRAMEWORK_ERROR,
+        %% This JSON fails to parse because of a bad string
         ocpp_rpc:decode(<<"[2, \"αβ\", \"BootNotification\", ",
                           ?BOOT_NOTIFICATION_REQUEST, "]">>))].
 

@@ -101,8 +101,8 @@ make_message([call, MessageId, Action, Payload]) when is_binary(Action) ->
     case validate(<<Action/binary, "Request">>, Payload) of
         {ok, _Payload} ->
             {ok, {call, MessageId, ocpp_message:request(Action, Payload)}};
-        {error, _} = Error ->
-            Error
+        {error, Reason} ->
+            {error, {Reason, MessageId}}
     end;
 make_message([callresult, MessageId, Payload]) ->
     {ok, {response, MessageId, Payload}};
@@ -130,7 +130,6 @@ decode_message_type([MessageTypeId|Rest]) ->
 decode_message_type(_) ->
     {error, rpc_framework_error}.
 
-
 parse_json(Binary) ->
     try {ok, jiffy:decode(Binary, [return_maps])}
     catch
@@ -151,7 +150,16 @@ validate(Action, Payload) ->
     case ocpp_schema:validate(Action, Payload) of
         ok ->
             {ok, {Action, Payload}};
-        {error, _} = Error -> Error
+        {error, unknown_action} ->
+            {error, not_implemented};
+        {error, invalid_payload} ->
+            {error, protocol_error};
+        {error, bad_property} ->
+            {error, occurrence_violation};
+        {error, bad_type} ->
+            {error, type_violation};
+        {error, bad_value} ->
+            {error, property_violation}
     end.
 
 %%% Utility functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
