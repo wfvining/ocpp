@@ -6,7 +6,7 @@
 -export([init_schemas/1, validate/2]).
 
 -type validation_error() :: bad_property
-                          | invalid_pdu
+                          | invalid_payload
                           | bad_type
                           | bad_value
                           | unknown_action.
