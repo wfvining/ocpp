@@ -10,8 +10,10 @@
 -export([start/2, stop/1]).
 
 start(_StartType, _StartArgs) ->
-    ocpp:start_ocpp_server([]),
-    ocpp_sup:start_link().
+    Options =
+        [{path, application:get_env(ocpp, wspath, "/ocpp")},
+         {port, application:get_env(ocpp, wsport, 3443)}],
+    ocpp_sup:start_link(Options).
 
 stop(_State) ->
     ok.

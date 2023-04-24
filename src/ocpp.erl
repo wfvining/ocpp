@@ -5,7 +5,7 @@
 
 -module(ocpp).
 
--export([start_ocpp_server/1, install/1, add_charging_station/2]).
+-export([install/1, add_charging_station/2]).
 
 -spec install(Nodes :: [node()]) -> ok.
 install(Nodes) ->
@@ -28,16 +28,3 @@ add_charging_station(Id, NumEvse) ->
         {atomic, Password} ->
             {ok, Password}
     end.
-
--spec start_ocpp_server(Options :: proplists:proplist()) -> {ok, pid()}.
-start_ocpp_server(Options) ->
-    BasePath = proplists:get_value(path, Options, "/ocpp"),
-    Port = proplists:get_value(port, Options, 3443),
-    Dispatch = cowboy_router:compile(
-                 [{'_', [{BasePath ++ "/:csname",
-                          ocpp_websocket_handler,
-                          []}]}]),
-    {ok, _} = cowboy:start_clear(
-                ocppj,
-                [{port, Port}],
-                #{env => #{dispatch => Dispatch}}).
