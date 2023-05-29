@@ -46,8 +46,6 @@ init_authenticated(StationName, Req, State) ->
                              <<"sec-websocket-protocol">>, <<"ocpp2.0.1">>, Req),
                     {cowboy_websocket, Req1, StationName, #{compress => true}};
                 false ->
-                    %% TODO
-                    %%
                     %% "If the CSMS does not agree to using one of the
                     %% subprotocols offered by the client, it MUST
                     %% complete the WebSocket handshake with a
@@ -56,10 +54,12 @@ init_authenticated(StationName, Req, State) ->
                     %% connection."
                     %%
                     %% (OCPP 2.0.1: Part 4 § 3.2)
-                    {ok, cowboy_req:reply(400, Req), State}
+                    {cowboy_websocket, Req, close, #{compress => true}}
             end
     end.
 
+websocket_init(close) ->
+    {[close], close};
 websocket_init(StationName) ->
     error('not implemented').
 
