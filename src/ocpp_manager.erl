@@ -1,5 +1,6 @@
-%%% @doc Server that manages the set of stations this CSMS is
-%%% responsible for. This includes monitoring the websocket server.
+%%% @doc This is the primary server used to handle interaction with
+%%% ocpp from clients such as CSMS implementations. It's primary task
+%%% is the manage adding and removing stations from the application.
 %%% @end
 %%%
 %%% Copyright 2023 (c) Will Vining <wfv@vining.dev>
@@ -8,39 +9,41 @@
 
 -behaviour(gen_server).
 
--export([start_link/1]).
+-export([start_link/0, add_station/3]).
 
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
 
 -define(SERVER, ?MODULE).
--define(LISTENER_NAME, ocppj).
 
 -record(state, {}).
 
-%% @doc
-%% Start the server.
-%%
-%% @param Options is a `proplist' containing the basic configuration
-%% options for the websocket server. Valid options are `{wspath,
-%% string()}' and `{wsport, 1..65535}' .
-%% @end
--spec start_link(Options :: proplists:proplist()) ->
-          {ok, Pid :: pid()} |
-          {error, Error :: {already_started, pid()}} |
-          {error, Error :: term()} |
-          ignore.
-start_link(Options) ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, Options, []).
+%% @doc Start the server.
+-spec start_link() ->
+          gen_server:start_ret().
+start_link() ->
+    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+
+%% @doc Add a station to the application. If successful a new
+%% `ocpp_station' state machine and its accompanying processes will be
+%% started and `HandlerCallbackModule' will be installed as the event
+%% handler of OCPP messages and events that need to be handled by the
+%% CSMS. The Pid of the station manager server for thew new station is
+%% returned.
+-spec add_station(StationName :: binary(),
+                  NumEVSE :: pos_integer(),
+                  HandlerCallbackModule :: module()) ->
+          {ok, StationManagerPid :: pid()} | {error, Reason :: any()}.
+add_station(StationName, NumEVSE, HandlerCallbackModule) ->
+    gen_server:call(
+      ?SERVER,
+      {add_station, {StationName, NumEVSE, HandlerCallbackModule}}).
 
 -spec init(Args :: term()) -> {ok, State :: term()} |
           {ok, State :: term(), Timeout :: timeout()} |
           {ok, State :: term(), hibernate} |
           {stop, Reason :: term()} |
           ignore.
-init(Options) ->
-    process_flag(trap_exit, true),
-    {ok, _} = start_ocpp_server(Options),
+init([]) ->
     {ok, #state{}}.
 
 -spec handle_call(Request :: term(), From :: {pid(), term()}, State :: term()) ->
@@ -71,28 +74,3 @@ handle_cast(_Request, State) ->
           {stop, Reason :: normal | term(), NewState :: term()}.
 handle_info(_Info, State) ->
     {noreply, State}.
-
--spec terminate(Reason :: normal | shutdown | {shutdown, term()} | term(),
-                State :: term()) -> any().
-terminate(_Reason, _State) ->
-    cowboy:stop_listener(?LISTENER_NAME).
-
--spec code_change(OldVsn :: term() | {down, term()},
-                  State :: term(),
-                  Extra :: term()) -> {ok, NewState :: term()} |
-          {error, Reason :: term()}.
-code_change(_OldVsn, State, _Extra) ->
-    {ok, State}.
-
--spec start_ocpp_server(Options :: proplists:proplist()) -> {ok, pid()}.
-start_ocpp_server(Options) ->
-    BasePath = proplists:get_value(path, Options, "/ocpp"),
-    Port = proplists:get_value(port, Options, 3443),
-    Dispatch = cowboy_router:compile(
-                 [{'_', [{BasePath ++ "/:csname",
-                          ocpp_websocket_handler,
-                          []}]}]),
-    {ok, _} = cowboy:start_clear(
-                ?LISTENER_NAME,
-                [{port, Port}],
-                #{env => #{dispatch => Dispatch}}).

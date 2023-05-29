@@ -6,11 +6,10 @@
   {applications,
    [kernel,
     stdlib,
-    cowboy,
     crypto,
     mnesia
    ]},
-  {env,[{wspath, "/ocpp"}, {wsport, 3443}]},
+  {env,[]},
   {modules, []},
 
   {licenses, ["Apache-2.0"]},
