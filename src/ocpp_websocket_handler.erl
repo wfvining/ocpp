@@ -61,7 +61,14 @@ init_authenticated(StationName, Req, State) ->
 websocket_init(close) ->
     {[close], close};
 websocket_init(StationName) ->
-    error('not implemented').
+    %% TODO Handle errors more gracefully here.
+    Station = ocpp_station:lookup(StationName),
+    case ocpp_station:connect(Station) of
+        ok -> {ok, Station};
+        {error, _Reason} ->
+            %% a connection is already established with this station.
+            {[close], StationName}
+    end.
 
 websocket_handle({text, Msg}, StationPid) ->
     case ocpp_rpc:decode(Msg) of
