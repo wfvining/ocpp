@@ -40,6 +40,14 @@ reconnect_test_() ->
       fun stop_station/1,
       fun test_station_reconnect/1}}.
 
+%% reject_premature_messages_test_() ->
+%%     {"Before a boot request has been accepted"
+%%      " all messages result in a security error",
+%%      {setup,
+%%       fun start_station/0,
+%%       fun stop_station/1,
+%%       fun test_station_boot_security_error/1}}.
+
 %% setup/teardown
 start_station() ->
     ocpp_station_registry:new(),
@@ -88,3 +96,19 @@ test_station_reconnect(#{stationid := StationId}) ->
     %% Wait for the first process to exit.
     receive {'DOWN', Ref, process, Pid, _} -> ok end,
     ?_assertEqual(ok, ocpp_station:connect(StationPid)).
+
+%% test_station_boot_security_error(#{stationid := StationId}) ->
+%%     {ok, StationPid} = ocpp_station_registry:lookup_station(StationId),
+%%     F = fun () ->
+%%                 ocpp_station:connect(StationPid),
+%%                 ocpp_station:boot_request(
+%%                   ocpp_request:boot_notification(
+%%                     power_up,
+%%                     ocpp_request:charging_station(<<"ModelFoo">>, <<"ManufacturerBar">>))),
+%%                 receive
+%%                     {send, Message} ->
+%%                         ok
+%%                 after
+%%                     10000 -> error(timeout)
+%%                 end,
+%%         end,

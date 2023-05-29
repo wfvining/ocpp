@@ -7,7 +7,7 @@
 
 -behaviour(supervisor).
 
--export([start_link/0, start_station/2]).
+-export([start_link/0, start_station/3]).
 -export([init/1]).
 
 -define(SERVER, ?MODULE).
@@ -26,13 +26,14 @@ init([]) ->
                        restart => transient}]}}.
 
 -spec start_station(StationId :: binary(),
-                    NumEVSE :: pos_integer()) ->
+                    NumEVSE :: pos_integer(),
+                    CSMSEventManager :: pid()) ->
           {ok, pid()} |
           {error, {already_started, pid()}}.
-start_station(StationId, NumEVSE) ->
+start_station(StationId, NumEVSE, CSMSEventManager) ->
     case ocpp_station_registry:lookup_station(StationId) of
         {ok, Pid} ->
             {error, {already_started, Pid}};
         {error, unregistered} ->
-            supervisor:start_child(?SERVER, [StationId, NumEVSE])
+            supervisor:start_child(?SERVER, [StationId, NumEVSE, CSMSEventManager])
     end.

@@ -15,7 +15,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(state, {}).
+-record(state, {stations = #{} :: #{binary() => {pid(), reference()}}}).
 
 %% @doc Start the server.
 -spec start_link() ->
@@ -55,9 +55,34 @@ init([]) ->
           {noreply, NewState :: term(), hibernate} |
           {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
           {stop, Reason :: term(), NewState :: term()}.
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+handle_call({add_station, {StationName, NumEVSE, HandlerCallbackModule}},
+            _From, #state{stations = Stations} = State) ->
+    case maps:is_key(StationName, Stations) of
+        true ->
+            {reply, {error, already_added}, State};
+        false ->
+            case do_add_station(StationName, NumEVSE, HandlerCallbackModule) of
+                {ok, {StationManagerPid, _} = StationManagerInfo} ->
+                    {reply, {ok, StationManagerPid},
+                     State#state{
+                       stations = Stations#{StationName => StationManagerInfo}}};
+                {error, _} = Error ->
+                    {reply, Error, State}
+            end
+    end.
+
+do_add_station(StationName, NumEVSE, HandlerCallbackModule) ->
+    case ocpp_station_manager_supersup:add_station(
+           StationName,
+           NumEVSE,
+           HandlerCallbackModule)
+    of
+        {ok, StationManagerPid} ->
+            MonRef = monitor(process, StationManagerPid),
+            {ok, {StationManagerPid, MonRef}};
+        {error, _} = Error ->
+            Error
+    end.
 
 -spec handle_cast(Request :: term(), State :: term()) ->
           {noreply, NewState :: term()} |

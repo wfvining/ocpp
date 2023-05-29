@@ -7,7 +7,7 @@
 
 -behaviour(gen_statem).
 
--export([start_link/2, stop/1, handle_rpc/2, connect/1, lookup/1]).
+-export([start_link/3, stop/1, handle_rpc/2, connect/1, lookup/1]).
 
 -export([init/1, callback_mode/0, code_change/3, terminate/3]).
 
@@ -25,13 +25,19 @@
 
 -record(data,
         {stationid :: binary(),
+         csms :: pid(),
          connection = disconnected :: disconnected | {pid(), reference()},
-         evse_sup :: pid(),
+         evse_sup :: undefined | pid(),
          evse = [] :: [pid()]}).
 
--spec start_link(Station :: binary(), NumEVSE :: pos_integer()) -> gen_statem:start_ret().
-start_link(Station, NumEVSE) ->
-    gen_statem:start_link(?MODULE, {Station, NumEVSE, self()}, []).
+-spec start_link(Station :: binary(),
+                 NumEVSE :: pos_integer(),
+                 CSMSEventManager :: pid()) -> gen_statem:start_ret().
+start_link(Station, NumEVSE, CSMSEventManager) ->
+    gen_statem:start_link(
+      ?MODULE,
+      {Station, NumEVSE, CSMSEventManager, self()},
+      []).
 
 %% @doc
 %% Connect the calling process to the station. Called by the process
@@ -70,11 +76,13 @@ lookup(StationId) ->
 
 callback_mode() -> state_functions.
 
-init({StationId, NumEVSE, Sup}) ->
+init({StationId, NumEVSE, CSMSEventManager, Sup}) ->
     process_flag(trap_exit, true),
+    link(CSMSEventManager),
     case ocpp_station_registry:register(StationId) of
         ok ->
-            {ok, disconnected, #data{stationid = StationId},
+            {ok, disconnected, #data{stationid = StationId,
+                                     csms = CSMSEventManager},
              [{next_event, internal, {init_evse, Sup, NumEVSE}}]};
         {error, already_registered} ->
             {stop, {already_registered,

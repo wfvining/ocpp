@@ -7,14 +7,14 @@
 
 -behaviour(supervisor).
 
--export([start_link/1]).
+-export([start_link/0]).
 
 -export([init/1]).
 
 -define(SERVER, ?MODULE).
 
-start_link(Options) ->
-    supervisor:start_link({local, ?SERVER}, ?MODULE, Options).
+start_link() ->
+    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 %% sup_flags() = #{strategy => strategy(),         % optional
 %%                 intensity => non_neg_integer(), % optional
@@ -25,7 +25,7 @@ start_link(Options) ->
 %%                  shutdown => shutdown(), % optional
 %%                  type => worker(),       % optional
 %%                  modules => modules()}   % optional
-init(Options) ->
+init([]) ->
     %% Initialize the schemas here so the top level supervisor owns the
     %% ETS tables created by Jesse.
     %%
@@ -42,7 +42,7 @@ init(Options) ->
                     type => supervisor,
                     modules => [ocpp_station_supersup]},
                   #{id => ocpp_csms_sup,
-                    start => {ocpp_csms_sup, start_link, [Options]},
+                    start => {ocpp_csms_sup, start_link, []},
                     restart => permanent,
                     tupe => supervisor,
                     modules => [ocpp_csms_sup]}],
