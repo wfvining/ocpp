@@ -72,7 +72,7 @@ handle_call({add_station, {StationName, NumEVSE, HandlerCallbackModule}},
     end.
 
 do_add_station(StationName, NumEVSE, HandlerCallbackModule) ->
-    case ocpp_station_manager_supersup:add_station(
+    case ocpp_station_supersup:start_station(
            StationName,
            NumEVSE,
            HandlerCallbackModule)

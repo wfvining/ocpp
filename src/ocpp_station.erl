@@ -78,7 +78,6 @@ callback_mode() -> state_functions.
 
 init({StationId, NumEVSE, CSMSEventManager, Sup}) ->
     process_flag(trap_exit, true),
-    link(CSMSEventManager),
     case ocpp_station_registry:register(StationId) of
         ok ->
             {ok, disconnected, #data{stationid = StationId,

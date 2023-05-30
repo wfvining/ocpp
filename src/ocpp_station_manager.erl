@@ -7,8 +7,6 @@
          handle_call/3, handle_cast/2,
          handle_info/2, terminate/2]).
 
--define(SERVER, ?MODULE).
-
 -record(state, {handler :: {module(), any()},
                 event_manager = undefined :: undefined | pid(),
                 supervisor :: pid()}).
@@ -35,14 +33,15 @@ handle_continue({initialize_station, {StationName, NumEVSE}},
                 #state{handler = {Module, InitArg}} = State) ->
     %% 1. Start the event manager
     {ok, EventManager} =
-        ocpp_station_manager_sup:start_event_manager(State#state.supervisor),
+        ocpp_station_sup:start_event_manager(State#state.supervisor),
     %% 2. Add the handler
     ok = ocpp_handler:add_handler(
            EventManager,
            Module,
            InitArg),
     %% 3. Start the station fsm
-    case ocpp_station_supersup:start_station(
+    case ocpp_station_sup:start_station(
+           State#state.supervisor,
            StationName,
            NumEVSE,
            EventManager)

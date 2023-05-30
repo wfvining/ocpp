@@ -27,13 +27,13 @@ init([]) ->
 
 -spec start_station(StationId :: binary(),
                     NumEVSE :: pos_integer(),
-                    CSMSEventManager :: pid()) ->
+                    CSMSHandler :: {Module :: module(), InitArg :: any()}) ->
           {ok, pid()} |
           {error, {already_started, pid()}}.
-start_station(StationId, NumEVSE, CSMSEventManager) ->
+start_station(StationId, NumEVSE, CSMSHandler) ->
     case ocpp_station_registry:lookup_station(StationId) of
         {ok, Pid} ->
             {error, {already_started, Pid}};
         {error, unregistered} ->
-            supervisor:start_child(?SERVER, [StationId, NumEVSE, CSMSEventManager])
+            supervisor:start_child(?SERVER, [StationId, NumEVSE, CSMSHandler])
     end.

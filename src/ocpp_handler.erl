@@ -72,4 +72,5 @@ handle_event(Event, State) ->
     {ok, State}.
 
 handle_call(Call, State) ->
-    io:format("got call ~p while state is ~p~n", [Call, State]).
+    io:format("got call ~p while state is ~p~n", [Call, State]),
+    {ok, error, State}.
