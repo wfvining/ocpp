@@ -5,9 +5,7 @@
   {mod, {ocpp_app, []}},
   {applications,
    [kernel,
-    stdlib,
-    crypto,
-    mnesia
+    stdlib
    ]},
   {env,[]},
   {modules, []},
