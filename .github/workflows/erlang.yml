@@ -12,11 +12,14 @@ permissions:
 jobs:
 
   build:
+    strategy:
+      matrix:
+        erlvsn: [24, 25, 26]
 
     runs-on: ubuntu-latest
 
     container:
-      image: erlang:22.0.7
+      image: erlang:${{ matrix.erlvsn }}
 
     steps:
     - uses: actions/checkout@v3
