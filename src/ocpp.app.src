@@ -5,7 +5,8 @@
   {mod, {ocpp_app, []}},
   {applications,
    [kernel,
-    stdlib
+    stdlib,
+    gproc
    ]},
   {env,[]},
   {modules, []},

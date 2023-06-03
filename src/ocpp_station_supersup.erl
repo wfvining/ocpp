@@ -19,7 +19,6 @@ init([]) ->
     SupFlags = #{strategy => simple_one_for_one,
                  intensity => 2,
                  period => 3600},
-    ocpp_station_registry:new(),
     {ok, {SupFlags, [#{id => station_sup,
                        start => {ocpp_station_sup, start_link, []},
                        type => supervisor,
@@ -31,9 +30,9 @@ init([]) ->
           {ok, pid()} |
           {error, {already_started, pid()}}.
 start_station(StationId, NumEVSE, CSMSHandler) ->
-    case ocpp_station_registry:lookup_station(StationId) of
-        {ok, Pid} ->
-            {error, {already_started, Pid}};
-        {error, unregistered} ->
-            supervisor:start_child(?SERVER, [StationId, NumEVSE, CSMSHandler])
+    case ocpp_station_manager:whereis(StationId) of
+        undefined ->
+            supervisor:start_child(?SERVER, [StationId, NumEVSE, CSMSHandler]);
+        Pid when is_pid(Pid) ->
+            {error, alread_started}
     end.

@@ -9,7 +9,7 @@
 
 -behaviour(gen_event).
 
--export([start_link/0, add_handler/3, rpc_request/2, rpc_response/2]).
+-export([start_link/1, add_handler/3, rpc_request/2, rpc_response/2]).
 -export([init/1, handle_event/2, handle_call/2]).
 
 -record(state, {handler_state :: any(), handler :: {module(), any()}}).
@@ -37,8 +37,11 @@
 
 -optional_callbacks([boot_notification/1]).
 
-start_link() ->
-    gen_event:start_link().
+-define(registry(Name), {via, gproc, ?name(Name)}).
+-define(name(Name), {n, l, {?MODULE, Name}}).
+
+start_link(StationId) ->
+    gen_event:start_link(?registry(StationId)).
 
 %% @doc Install the CSMS handler module as the handler for OCPP
 %% Messages.
@@ -46,7 +49,8 @@ start_link() ->
                   CallbackModule :: module(),
                   InitArg :: any()) -> ok.
 add_handler(Manager, CallbackModule, InitArg) ->
-    ok = gen_event:add_sup_handler(Manager, ?MODULE, {CallbackModule, InitArg}).
+    ok = gen_event:add_sup_handler(
+           ?registry(Manager), ?MODULE, {CallbackModule, InitArg}).
 
 %% @doc Notify the event manager that an RPC Request has been received.
 -spec rpc_request(EventManager :: pid(), Request :: term()) -> ok.

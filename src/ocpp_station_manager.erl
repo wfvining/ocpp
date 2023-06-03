@@ -2,55 +2,37 @@
 
 -behaviour(gen_server).
 
--export([start_link/4]).
+-export([start_link/2, whereis/1]).
 -export([init/1, handle_continue/2,
          handle_call/3, handle_cast/2,
          handle_info/2, terminate/2]).
 
--record(state, {handler :: {module(), any()},
-                event_manager = undefined :: undefined | pid(),
-                supervisor :: pid()}).
+-define(registry(Name), {via, gproc, ?name(Name)}).
+-define(name(Name), {n, l, {?MODULE, Name}}).
 
--spec start_link(Supervisor :: pid(),
-                 StationName :: binary(),
-                 NumEVSE :: pos_integer(),
+-record(state, {handler :: {module(), any()},
+                stationid :: binary()}).
+
+-spec start_link(StationId :: binary(),
                  CSMSHandler :: {Module :: module(), InitArg :: any()}) ->
           gen_server:start_ret().
-start_link(Supervisor, StationName, NumEVSE, CSMSHandler) ->
+start_link(StationId, CSMSHandler) ->
     gen_server:start_link(
-      ?MODULE,
-      {Supervisor, StationName, NumEVSE, CSMSHandler},
-      []).
+      ?registry(StationId), ?MODULE, {StationId, CSMSHandler}, []).
 
-init({Supervisor, StationName, NumEVSE, HandlerCallBackModule}) ->
-    process_flag(trap_exit, true),
-    {ok,
-     #state{handler = HandlerCallBackModule,
-            supervisor = Supervisor},
-     {continue, {initialize_station, {StationName, NumEVSE}}}}.
+-spec whereis(StationId :: binary()) -> pid() | undefined.
+whereis(StationId) ->
+    gproc:where(?name(StationId)).
 
-handle_continue({initialize_station, {StationName, NumEVSE}},
+init({StationId, HandlerCallBackModule}) ->
+    {ok, #state{handler = HandlerCallBackModule,
+                stationid = StationId},
+     {continue, install_handler}}.
+
+handle_continue(install_handler,
                 #state{handler = {Module, InitArg}} = State) ->
-    %% 1. Start the event manager
-    {ok, EventManager} =
-        ocpp_station_sup:start_event_manager(State#state.supervisor),
-    %% 2. Add the handler
-    ok = ocpp_handler:add_handler(
-           EventManager,
-           Module,
-           InitArg),
-    %% 3. Start the station fsm
-    case ocpp_station_sup:start_station(
-           State#state.supervisor,
-           StationName,
-           NumEVSE,
-           EventManager)
-    of
-        {ok, _Pid} ->
-            {noreply, State#state{event_manager = EventManager}};
-        {error, Reason} ->
-            {stop, Reason, State}
-    end.
+    ok = ocpp_handler:add_handler(State#state.stationid, Module, InitArg),
+    {noreply, State}.
 
 handle_call(Call, _From, State) ->
     logger:warning("Unexpected call ~p", [Call]),

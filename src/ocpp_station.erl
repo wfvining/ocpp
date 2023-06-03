@@ -7,7 +7,7 @@
 
 -behaviour(gen_statem).
 
--export([start_link/3, stop/1, handle_rpc/2, connect/1, lookup/1]).
+-export([start_link/3, stop/1, handle_rpc/2, connect/1]).
 
 -export([init/1, callback_mode/0, code_change/3, terminate/3]).
 
@@ -23,21 +23,21 @@
          reset_accepted/3,
          reset_scheduled/3]).
 
+-define(registry(Module, Name), {via, gproc, {n, l, {Module, Name}}}).
+-define(registry(Name), ?registry(?MODULE, Name)).
+
 -record(data,
         {stationid :: binary(),
-         csms :: pid(),
          connection = disconnected :: disconnected | {pid(), reference()},
          evse_sup :: undefined | pid(),
          evse = [] :: [pid()]}).
 
--spec start_link(Station :: binary(),
+-spec start_link(StationId :: binary(),
                  NumEVSE :: pos_integer(),
-                 CSMSEventManager :: pid()) -> gen_statem:start_ret().
-start_link(Station, NumEVSE, CSMSEventManager) ->
+                 Supervisor :: pid()) -> gen_statem:start_ret().
+start_link(StationId, NumEVSE, Supervisor) ->
     gen_statem:start_link(
-      ?MODULE,
-      {Station, NumEVSE, CSMSEventManager, self()},
-      []).
+      ?registry(StationId), ?MODULE, {StationId, NumEVSE, Supervisor}, []).
 
 %% @doc
 %% Connect the calling process to the station. Called by the process
@@ -46,47 +46,25 @@ start_link(Station, NumEVSE, CSMSEventManager) ->
 -spec connect(Station :: pid())
              -> ok | {error, already_connected}.
 connect(Station) ->
-    gen_statem:call(Station, {connect, self()}).
+    gen_statem:call(?registry(Station), {connect, self()}).
 
 %% @doc Handle an OCPP remote procedure call.
 -spec handle_rpc(Station :: pid(), Request :: ocpp_request:request()) ->
           {reply, Response :: map()} |
           {error, Reason :: ocpp_rpc:rpcerror()}.
 handle_rpc(Station, Request) ->
-   gen_statem:call(Station, {rpccall, Request}).
+   gen_statem:call(?registry(Station), {rpccall, Request}).
 
 -spec stop(Station :: pid()) -> ok.
 stop(Station) ->
     gen_statem:stop(Station).
 
-%% @doc
-%% Lookup the Pid corresponding to the `StationId'. If `StationId' is
-%% not a station that is currently running then the call fails with
-%% reason `badarg'.
-%% @end
--spec lookup(StationId :: binary()) -> pid().
-lookup(StationId) ->
-    case ocpp_station_registry:lookup_station(StationId) of
-        {ok, Pid} ->
-            Pid;
-        {error, unregistered} ->
-            error(badarg, [StationId])
-    end.
-
-
 callback_mode() -> state_functions.
 
-init({StationId, NumEVSE, CSMSEventManager, Sup}) ->
+init({StationId, NumEVSE, Sup}) ->
     process_flag(trap_exit, true),
-    case ocpp_station_registry:register(StationId) of
-        ok ->
-            {ok, disconnected, #data{stationid = StationId,
-                                     csms = CSMSEventManager},
-             [{next_event, internal, {init_evse, Sup, NumEVSE}}]};
-        {error, already_registered} ->
-            {stop, {already_registered,
-                    element(2, ocpp_station_registry:lookup_station(StationId))}}
-    end.
+    {ok, disconnected, #data{stationid = StationId},
+     [{next_event, internal, {init_evse, Sup, NumEVSE}}]}.
 
 disconnected(internal, {init_evse, Sup, NumEVSE}, Data) ->
     {ok, EVSESup} = ocpp_station_sup:start_evse_sup(Sup),
@@ -132,7 +110,7 @@ code_change(_OldVsn, _NewVsn, Data) ->
     {ok, Data}.
 
 terminate(_Reason, _State, _Data) ->
-    ocpp_station_registry:unregister().
+    ok.
 
 handle_event(info, {'DOWN', Ref, process, Pid, _},
              #data{connection = {Pid, Ref}}) ->

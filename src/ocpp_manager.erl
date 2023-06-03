@@ -56,32 +56,16 @@ init([]) ->
           {stop, Reason :: term(), Reply :: term(), NewState :: term()} |
           {stop, Reason :: term(), NewState :: term()}.
 handle_call({add_station, {StationName, NumEVSE, HandlerCallbackModule}},
-            _From, #state{stations = Stations} = State) ->
-    case maps:is_key(StationName, Stations) of
-        true ->
-            {reply, {error, already_added}, State};
-        false ->
-            case do_add_station(StationName, NumEVSE, HandlerCallbackModule) of
-                {ok, {StationManagerPid, _} = StationManagerInfo} ->
-                    {reply, {ok, StationManagerPid},
-                     State#state{
-                       stations = Stations#{StationName => StationManagerInfo}}};
-                {error, _} = Error ->
-                    {reply, Error, State}
-            end
-    end.
-
-do_add_station(StationName, NumEVSE, HandlerCallbackModule) ->
+            _From, State) ->
     case ocpp_station_supersup:start_station(
            StationName,
            NumEVSE,
            HandlerCallbackModule)
     of
-        {ok, StationManagerPid} ->
-            MonRef = monitor(process, StationManagerPid),
-            {ok, {StationManagerPid, MonRef}};
+        {ok, _} ->
+            {reply, ok, State};
         {error, _} = Error ->
-            Error
+            {reply, Error, State}
     end.
 
 -spec handle_cast(Request :: term(), State :: term()) ->
