@@ -4,5 +4,7 @@
 
 -export([init/1]).
 
+init({error, Reason}) ->
+    error(Reason);
 init(_) ->
     {ok, nil}.

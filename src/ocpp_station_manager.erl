@@ -3,7 +3,7 @@
 -behaviour(gen_server).
 
 -export([start_link/2, whereis/1]).
--export([init/1, handle_continue/2,
+-export([init/1,
          handle_call/3, handle_cast/2,
          handle_info/2, terminate/2]).
 
@@ -24,15 +24,15 @@ start_link(StationId, CSMSHandler) ->
 whereis(StationId) ->
     gproc:where(?name(StationId)).
 
-init({StationId, HandlerCallBackModule}) ->
-    {ok, #state{handler = HandlerCallBackModule,
-                stationid = StationId},
-     {continue, install_handler}}.
-
-handle_continue(install_handler,
-                #state{handler = {Module, InitArg}} = State) ->
-    ok = ocpp_handler:add_handler(State#state.stationid, Module, InitArg),
-    {noreply, State}.
+init({StationId, {Module, InitArg} = HandlerCallBackModule}) ->
+    case ocpp_handler:add_handler(StationId, Module, InitArg) of
+        ok ->
+            {ok, #state{handler = HandlerCallBackModule,
+                        stationid = StationId}};
+        {ErrType, Reason} when ErrType =:= error;
+                               ErrType =:= 'EXIT' ->
+            {stop, {error, {handler, Reason}}}
+    end.
 
 handle_call(Call, _From, State) ->
     logger:warning("Unexpected call ~p", [Call]),

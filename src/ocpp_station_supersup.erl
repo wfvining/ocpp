@@ -32,7 +32,16 @@ init([]) ->
 start_station(StationId, NumEVSE, CSMSHandler) ->
     case ocpp_station_manager:whereis(StationId) of
         undefined ->
-            supervisor:start_child(?SERVER, [StationId, NumEVSE, CSMSHandler]);
+            do_start_station(StationId, NumEVSE, CSMSHandler);
         Pid when is_pid(Pid) ->
-            {error, alread_started}
+            {error, {already_started, Pid}}
+    end.
+
+do_start_station(StationId, NumEVSE, CSMSHandler) ->
+    case supervisor:start_child(
+           ?SERVER, [StationId, NumEVSE, CSMSHandler])
+    of
+        {ok, _} = Ok -> Ok;
+        {error, {shutdown, {failed_to_start_child, _, Err}}} ->
+            Err
     end.

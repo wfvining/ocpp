@@ -47,10 +47,10 @@ start_link(StationId) ->
 %% Messages.
 -spec add_handler(Manager :: pid(),
                   CallbackModule :: module(),
-                  InitArg :: any()) -> ok.
+                  InitArg :: any()) -> gen_event:add_handler_ret().
 add_handler(Manager, CallbackModule, InitArg) ->
-    ok = gen_event:add_sup_handler(
-           ?registry(Manager), ?MODULE, {CallbackModule, InitArg}).
+    gen_event:add_sup_handler(
+      ?registry(Manager), ?MODULE, {CallbackModule, InitArg}).
 
 %% @doc Notify the event manager that an RPC Request has been received.
 -spec rpc_request(EventManager :: pid(), Request :: term()) -> ok.
@@ -63,12 +63,14 @@ rpc_response(EventManager, Response) ->
     gen_event:notify(EventManager, {rpc_response, Response}).
 
 init({CallbackModule, InitArg} = Handler) ->
-    case CallbackModule:init(InitArg) of
+    try CallbackModule:init(InitArg) of
         {ok, State} ->
             {ok, #state{handler_state = State,
                         handler = Handler}};
         {error, _} = Error ->
             Error
+    catch error:Reason ->
+            {error, {init, Reason}}
     end.
 
 handle_event(Event, State) ->
