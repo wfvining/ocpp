@@ -81,4 +81,7 @@ init_error(Config) ->
     {error, {handler, {init, 'init error test'}}} =
         ocpp_station_supersup:start_station(
           StationId, 1, {do_nothing_handler, {error, 'init error test'}}),
-    ?assertExit({noproc, _}, ocpp_station:connect(StationId)).
+    ?assertExit({noproc, _}, ocpp_station:connect(StationId)),
+    {ok,_} = ocpp_station_supersup:start_station(
+               StationId, 1, {do_nothing_handler, nil}),
+    ok = ocpp_station:connect(StationId).
