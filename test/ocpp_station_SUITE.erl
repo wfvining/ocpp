@@ -1,0 +1,52 @@
+-module(ocpp_station_SUITE).
+
+-include_lib("common_test/include/ct.hrl").
+
+-compile(export_all).
+
+-define(stationid(Case),
+        list_to_binary(
+          atom_to_list(?MODULE) ++ "_" ++ atom_to_list(Case) ++ "_station")).
+
+all() ->
+    [connect_station, start_after_stop].
+
+init_per_testcase(Case, Config) ->
+    {ok, Apps} = application:ensure_all_started(gproc),
+    StationId = ?stationid(Case),
+    {ok, Sup} = ocpp_station_supersup:start_link(),
+    {ok, StationSup} =
+        ocpp_station_supersup:start_station(
+          StationId, 2, {do_nothing_handler, nil}),
+    [{stationid, StationId},
+     {ok, Apps},
+     {stationsup, StationSup},
+     {supersup, Sup} | Config].
+
+end_per_testcase(Config) ->
+    SuperSup = ?config(supersup, Config),
+    gen_server:stop(SuperSup),
+    [application:stop(App) || App <- ?config(apps, Config)],
+    Config.
+
+connect_station() ->
+    [{doc, "Can only connect to a station once."}].
+connect_station(Config) ->
+    StationId = ?config(stationid, Config),
+    ok = ocpp_station:connect(StationId),
+    {error, already_connected} = ocpp_station:connect(StationId).
+
+start_after_stop() ->
+    [{doc, "Can start and connect to a station with the "
+      "same name as one that has been stopped."}].
+start_after_stop(Config) ->
+    StationId = ?config(stationid, Config),
+    StationSup = ?config(stationsup, Config),
+    ok = ocpp_station:connect(StationId),
+    gen_server:stop(StationSup),
+    %% Give a moment for everything to die.
+    timer:sleep(100),
+    {ok, _NewStationSup} =
+        ocpp_station_supersup:start_station(
+          StationId, 2, {do_nothing_handler, nil}),
+    ok = ocpp_station:connect(StationId).
