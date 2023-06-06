@@ -45,10 +45,9 @@
 -define(MESSAGE_TYPE_ERROR, 4).
 
 -spec call(MessageId :: messageid(), Action :: binary(), Payload :: map()) ->
-          {ok, Message :: binary()} |
-          {error, Reason :: any()}.
+          message().
 call(MessageId, Action, Payload) ->
-    encode_json([messagetype_to_id(call), MessageId, Action, Payload]).
+    {call, MessageId, Action, Payload}.
 
 %% @doc Construct an ocpp callerror from an error value returned by `decode/1'.
 -spec callerror(Error :: decode_error()) -> binary().
