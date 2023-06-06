@@ -15,8 +15,25 @@ all() ->
      {group, handler}].
 
 groups() ->
-    [{handler, [init_error]}, %% TODO add tests for handling OCPP requests
+    [{handler, [init_error, {group, boot_request}]},
+     {boot_request, [boot_accepted, boot_rejected, boot_pending]},
      {start, [start_after_stop, start_twice]}].
+
+init_per_suite(Config) ->
+    application:ensure_all_started(jerk),
+    %% Load the schemas.
+    PrivDir = code:priv_dir(ocpp),
+    ok = jerk:load_schema(
+           filename:join(
+             [PrivDir, "json_schemas", "BootNotificationRequest.json"])),
+    ok = jerk:load_schema(
+           filename:join(
+             [PrivDir, "json_schemas", "BootNotificationResponse.json"])),
+    Config.
+
+end_per_suite(Config) ->
+    application:stop(jerk),
+    Config.
 
 init_per_testcase(init_error = Case, Config) ->
     {ok, Apps} = application:ensure_all_started(gproc),
@@ -31,7 +48,7 @@ init_per_testcase(Case, Config) ->
     {ok, Sup} = ocpp_station_supersup:start_link(),
     {ok, StationSup} =
         ocpp_station_supersup:start_station(
-          StationId, 2, {do_nothing_handler, nil}),
+          StationId, 2, {testing_handler, nil}),
     [{stationid, StationId},
      {ok, Apps},
      {stationsup, StationSup},
@@ -56,7 +73,7 @@ start_twice(Config) ->
     StationId = ?config(stationid, Config),
     ManagerPid = ocpp_station_manager:whereis(StationId),
     {error, {already_started, ManagerPid}} =
-        ocpp_station_supersup:start_station(StationId, 2, {do_nothing_handler, nil}).
+        ocpp_station_supersup:start_station(StationId, 2, {testing_handler, nil}).
 
 start_after_stop() ->
     [{doc, "Can start and connect to a station with the "
@@ -70,7 +87,7 @@ start_after_stop(Config) ->
     timer:sleep(100),
     {ok, _NewStationSup} =
         ocpp_station_supersup:start_station(
-          StationId, 2, {do_nothing_handler, nil}),
+          StationId, 2, {testing_handler, nil}),
     ok = ocpp_station:connect(StationId).
 
 init_error() ->
@@ -80,8 +97,37 @@ init_error(Config) ->
     StationId = ?config(stationid, Config),
     {error, {handler, {init, 'init error test'}}} =
         ocpp_station_supersup:start_station(
-          StationId, 1, {do_nothing_handler, {error, 'init error test'}}),
+          StationId, 1, {testing_handler, {error, 'init error test'}}),
     ?assertExit({noproc, _}, ocpp_station:connect(StationId)),
     {ok,_} = ocpp_station_supersup:start_station(
-               StationId, 1, {do_nothing_handler, nil}),
+               StationId, 1, {testing_handler, nil}),
     ok = ocpp_station:connect(StationId).
+
+boot_accepted() ->
+    [{doc,
+      "A boot request received by the station is accepted by the handler"}].
+boot_accepted(Config) ->
+    StationId = ?config(stationid, Config),
+    ok = ocpp_station:connect(StationId),
+    TimeStr = calendar:system_time_to_rfc3339(12345678, [{offset, "Z"}]),
+    Interval = 1234,
+    Payload =
+        #{"chargingStation" =>
+              #{"model" => "ct_model",
+                "vendorName" =>  "foo"},
+          "reason" => "PowerUp",
+          "customData" =>
+              #{"testAction" => "ACCEPT",
+                "interval" => Interval,
+                "currentTime" => TimeStr,
+                "vendoeId" => "foo"}},
+    Req = ocpp_message:new_request("BootNotification", Payload),
+    {ok, {accepted, Options}} = ocpp_station:rpc(StationId, Req),
+    ?assertEqual(Interval, proplists:get_value(interval, Options)),
+    ?assertEqual(TimeStr, proplists:get_value(current_time, Options)).
+
+boot_pending(_Config) ->
+    ?assert(false).
+
+boot_rejected(_Config) ->
+    ?assert(false).
