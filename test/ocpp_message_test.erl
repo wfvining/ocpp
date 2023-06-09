@@ -27,9 +27,7 @@ create_message_test_() ->
     {setup, fun load_schemas/0, fun teardown_apps/1,
      {inparallel,
       [ fun construct_from_map/0
-      %% , fun construct_from_list/1
-      %% , fun construct_from_mixed/1
-      %% , construct_with_error()
+      , construct_with_error()
       ]}}.
 
 %% QUESTION should I maybe support building these out of jerk terms?
@@ -48,9 +46,13 @@ construct_from_map() ->
                  ocpp_message:get(<<"customData/vendorId">>, Message)).
 %% TODO get raises a badkey error when the property is not defined.
 
-%% TODO
-%% construct_with_error() ->
-%%     {"constructing a message with an invalid property name or value "
-%%      "causes a badarg error",
-%%      {inparallel,
-%%       [fun todo/0]}}.
+construct_with_error() ->
+    {"constructing a message with an invalid property name or value "
+     "causes a badarg error",
+     {inparallel,
+      [?_assertError(
+          badarg,
+          ocpp_message:new(<<"CancelReservationRequest">>, Message))
+       || Message <- [#{<<"bad-key">> => 2323, <<"reservationId">> => 123},
+                      #{<<"reservationId">> => <<"not-an-integer">>},
+                      #{}]]}}.
