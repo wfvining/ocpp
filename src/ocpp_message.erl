@@ -1,46 +1,92 @@
 -module(ocpp_message).
 
--export([get/2, fields/1, request/2, response/2]).
+-export([new/2, properties/1, get/2, get/3]).
 
--export_type([kind/0, action/0, message/0, payload/0]).
+-type payload() :: #{string() => jerk:primterm() | payload()}
+                 | [{string(), jerk:primterm() | payload()}].
 
--type fieldname() :: binary().
--type kind() :: request | response.
--type action() :: binary().
-%% -type id_string() :: [$a..$z | $A..$Z | $0..$9 | $* | $- |
-%%                       $_ | $= | $: | $+ | $@ | $.].
--type id_string() :: binary().
--type primitive() :: binary()
-                   | id_string()
-                   | integer()
-                   | float()
-                   | calendar:datetime()
-                   | boolean().
--opaque payload() :: #{fieldname() => payload() | primitive()}.
--type message() :: {kind(), action(), payload()}.
+-export_type([message/0, messageid/0]).
 
--spec get(Field :: fieldname(), Payload :: payload()) -> any().
-get(Field, Payload) ->
-    maps:get(Field, Payload).
+-opaque message() :: {messageid(), jerk:jerkterm()}.
+-type messageid() :: string().
 
--spec fields(Payload :: payload()) -> [fieldname()].
-fields(Payload) ->
-    maps:keys(Payload).
+-define(BASE_PATH, "urn:OCPP:Cp:2:2020:3").
 
--spec request(Action :: action(), Payload :: map()) -> message().
-request(Action, Payload) ->
-    case ocpp_schema:validate(<<Action/binary, "Request">>, Payload) of
-        ok ->
-            {request, Action, Payload};
-        {error, Reason} ->
-            error(Reason)
+-spec properties(message()) -> [binary()].
+properties({_, Message}) ->
+    jerk:attributes(Message).
+
+-spec get(Key :: binary(), Message :: message()) -> jerk:primterm() | jerk:jerkterm().
+get(Key, {_, Message}) ->
+    get_value(string:split(Key, "/", all), Message).
+
+get_value([], Value) -> Value;
+get_value([Key|Rest], IntermediateValue) ->
+    get_value(Rest, jerk:get_value(IntermediateValue, Key)).
+
+-spec get(Key :: binary(), Message :: message(), Default) ->
+          jerk:primterm() | jerk:jerkterm() | Default.
+get(Key, {_, Message} = Msg, Default) ->
+    case lists:member(Key, jerk:attributes(Message)) of
+        true ->
+            get(Key, Msg);
+        false ->
+            Default
     end.
 
--spec response(Action :: action(), Payload :: map()) -> message().
-response(Action, Payload) ->
-    case ocpp_schema:validate(<<Action/binary, "Response">>, Payload) of
-        ok ->
-            {response, Action, Payload};
-        {error, Reason} ->
-            error(Reason)
-    end.
+%% @doc @see new/3
+-spec new(MessageType :: string(), Payload :: payload()) -> message().
+new(MessageType, Payload) ->
+    new(MessageType, Payload, new_messageid()).
+
+%% @doc Create a new message. If the properties in `Payload' are
+%% invalid the call will fail with reason `badarg'
+-spec new(MessageType :: string(), Payload :: payload(), MessageId :: messageid()) ->
+          message().
+new(MessageType, Payload, MessageId) ->
+    {MessageId, jerk:new(message_uri(MessageType), prepare_payload(Payload))}.
+
+message_uri(MessageType) when is_list(MessageType) ->
+    message_uri(list_to_binary(MessageType));
+message_uri(MessageType) when is_binary(MessageType) ->
+    <<?BASE_PATH, ":", MessageType/binary>>.
+
+%% transform a map into a key-value list and list-based strings
+%% into binaries.
+prepare_payload(Payload) when is_list(Payload) ->
+    [ prepare_property(Property) || Property <- Payload];
+prepare_payload(Payload) when is_map(Payload) ->
+    prepare_payload(maps:to_list(Payload)).
+
+prepare_property({K, V}) ->
+    {to_binary(K), prepare_value(V)}.
+
+to_binary(X) when is_list(X) ->
+    list_to_binary(X);
+to_binary(X) ->
+    X.
+
+prepare_value(V) when is_map(V) ->
+    prepare_payload(V);
+prepare_value(V) when is_list(V) ->
+    case is_property_list(V) of
+        true ->
+            prepare_payload(V);
+        false ->
+            V
+    end;
+prepare_value(V) ->
+    V.
+
+is_property_list([]) -> false;
+is_property_list(List) ->
+    lists:all(
+      fun ({X, _}) when is_list(X)   -> io_lib:printable_unicode_list(X);
+          ({X, _}) when is_binary(X) -> true;
+          (_)                        -> false
+      end,
+      List).
+
+new_messageid() ->
+    %% TODO replace with a uuid library
+    ref_to_list(erlang:make_ref()).
