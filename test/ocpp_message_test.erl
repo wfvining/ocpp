@@ -30,7 +30,20 @@ create_message_test_() ->
       , construct_with_error()
       ]}}.
 
-%% QUESTION should I maybe support building these out of jerk terms?
+get_nested_test_() ->
+    {"Can separate a nested object from its message but still use the"
+     "ocpp_message API to access its fields.",
+     {setup, fun load_schemas/0, fun teardown_apps/1,
+      [fun() ->
+               MessageType = <<"CancelReservationRequest">>,
+               Payload = #{<<"reservationId">> => 123,
+                           <<"customData">> =>
+                               #{<<"foo">> => [1, 2, 3],
+                                 <<"vendorId">> => <<"this is the vendor id">>}},
+               Message = ocpp_message:new(MessageType, Payload),
+               CustomData = ocpp_message:get(<<"customData">>, Message),
+               ?assertEqual([1, 2, 3], ocpp_message:get(<<"foo">>, CustomData))
+       end]}}.
 
 construct_from_map() ->
     MessageType = <<"CancelReservationRequest">>,
@@ -44,7 +57,6 @@ construct_from_map() ->
     ?assertEqual(123, ocpp_message:get(<<"reservationId">>, Message)),
     ?assertEqual(<<"this is the vendor id">>,
                  ocpp_message:get(<<"customData/vendorId">>, Message)).
-%% TODO get raises a badkey error when the property is not defined.
 
 construct_with_error() ->
     {"constructing a message with an invalid property name or value "

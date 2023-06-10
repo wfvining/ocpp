@@ -16,23 +16,43 @@
 properties({_, Message}) ->
     jerk:attributes(Message).
 
+%% Objective - when we return a value that is itself a jerk object, we
+%% return a message fragment with an id equal to <<MessageId/binary,
+%% "#/", AttributeName>>. (e.g. "1235412deadbeef#/chargingStation")
+
+-record(msgid, {id :: string(), path = [] :: [string()]}).
+
 -spec get(Key :: binary(), Message :: message()) -> jerk:primterm() | jerk:jerkterm().
-get(Key, {_, Message}) ->
-    get_value(string:split(Key, "/", all), Message).
+get(Key, {MessageId, Message}) ->
+    get(string:split(Key, "/", all), decompose_msgid(MessageId), Message).
 
-get_value([], Value) -> Value;
-get_value([Key|Rest], IntermediateValue) ->
-    get_value(Rest, jerk:get_value(IntermediateValue, Key)).
-
--spec get(Key :: binary(), Message :: message(), Default) ->
-          jerk:primterm() | jerk:jerkterm() | Default.
-get(Key, {_, Message} = Msg, Default) ->
-    case lists:member(Key, jerk:attributes(Message)) of
-        true ->
-            get(Key, Msg);
-        false ->
-            Default
+decompose_msgid(MessageId) ->
+    case string:split(MessageId, "#/") of
+        [MessageId] ->
+            #msgid{id = MessageId};
+        [MsgId, Path] ->
+            #msgid{id = MsgId, path = string:split(Path, "/", all)}
     end.
+
+recompose_msgid(#msgid{id = Id, path = []}) ->
+    Id;
+recompose_msgid(#msgid{id = Id, path = Path}) ->
+    string:join([Id, safejoin(Path, "/")], "#/").
+
+safejoin(Strings, _Delimiter) when length(Strings) =:= 1 -> hd(Strings);
+safejoin(Strings, Delimiter) -> string:join(Strings, Delimiter).
+
+get([], MessageId, Value) ->
+    case jerk:is_object(Value) of
+        true ->
+            {recompose_msgid(MessageId), Value};
+        false ->
+            Value
+    end;
+get([Key|Rest], #msgid{path = Path} = MsgId, IntermediatValue) ->
+    get(Rest,
+        MsgId#msgid{path = Path ++ [Key]},
+        jerk:get_value(IntermediatValue, Key)).
 
 %% @doc @see new/3
 -spec new(MessageType :: string(), Payload :: payload()) -> message().
