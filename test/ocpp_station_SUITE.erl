@@ -113,15 +113,15 @@ boot_accepted(Config) ->
     Interval = 1234,
     Payload =
         #{"chargingStation" =>
-              #{"model" => "ct_model",
-                "vendorName" =>  "foo"},
-          "reason" => "PowerUp",
+              #{"model" => <<"ct_model">>,
+                "vendorName" =>  <<"foo">>},
+          "reason" => <<"PowerUp">>,
           "customData" =>
-              #{"testAction" => "ACCEPT",
+              #{"testAction" => <<"ACCEPT">>,
                 "interval" => Interval,
-                "currentTime" => TimeStr,
-                "vendoeId" => "foo"}},
-    Req = ocpp_message:new_request("BootNotification", Payload),
+                "currentTime" => list_to_binary(TimeStr),
+                "vendoeId" => <<"foo">>}},
+    Req = ocpp_message:new("BootNotificationRequest", Payload),
     {ok, {accepted, Options}} = ocpp_station:rpc(StationId, Req),
     ?assertEqual(Interval, proplists:get_value(interval, Options)),
     ?assertEqual(TimeStr, proplists:get_value(current_time, Options)).
