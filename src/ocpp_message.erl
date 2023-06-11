@@ -123,5 +123,6 @@ is_property_list(List) ->
       List).
 
 new_messageid() ->
-    %% TODO replace with a uuid library
-    ref_to_list(erlang:make_ref()).
+    list_to_binary(
+      lists:flatten(
+        io_lib:format("~.16b", [erlang:unique_integer([positive])]))).
