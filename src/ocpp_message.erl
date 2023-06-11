@@ -2,8 +2,8 @@
 
 -export([new/2, new/3, properties/1, get/2, get/3, id/1, type/1]).
 
--type payload() :: #{string() => jerk:primterm() | payload()}
-                 | [{string(), jerk:primterm() | payload()}].
+-type payload() :: #{binary() | string() => jerk:primterm() | payload()}
+                 | [{binary() | string(), jerk:primterm() | payload()}].
 
 -export_type([message/0, messageid/0]).
 
@@ -20,10 +20,10 @@ properties({_, Message}) ->
 %% return a message fragment with an id equal to <<MessageId/binary,
 %% "#/", AttributeName>>. (e.g. "1235412deadbeef#/chargingStation")
 
--record(msgid, {id :: string(), path = [] :: [binary()]}).
+-record(msgid, {id :: binary(), path = [] :: [binary()]}).
 
 -spec type(Message :: message()) -> binary().
-type({MessageId, Message}) ->
+type({_MessageId, Message}) ->
     Schema = jerk:id(Message),
     hd(lists:reverse(binary:split(Schema, <<":">>, [global]))).
 
@@ -36,7 +36,7 @@ decompose_msgid(MessageId) ->
         [MessageId] ->
             #msgid{id = MessageId};
         [MsgId, Path] ->
-            #msgid{id = MsgId, path = [binary:split(Path, <<"/">>, [global])]}
+            #msgid{id = MsgId, path = binary:split(Path, <<"/">>, [global])}
     end.
 
 recompose_msgid(#msgid{id = Id, path = []}) ->
@@ -64,13 +64,13 @@ get([Key|Rest], #msgid{path = Path} = MsgId, IntermediatValue) ->
         jerk:get_value(IntermediatValue, Key)).
 
 %% @doc @see new/3
--spec new(MessageType :: string(), Payload :: payload()) -> message().
+-spec new(MessageType :: binary(), Payload :: payload()) -> message().
 new(MessageType, Payload) ->
     new(MessageType, Payload, new_messageid()).
 
 %% @doc Create a new message. If the properties in `Payload' are
 %% invalid the call will fail with reason `badarg'
--spec new(MessageType :: string(), Payload :: payload(), MessageId :: messageid()) ->
+-spec new(MessageType :: binary(), Payload :: payload(), MessageId :: messageid()) ->
           message().
 new(MessageType, Payload, MessageId) when is_list(MessageId) ->
     new(MessageType, Payload, list_to_binary(MessageId));
