@@ -104,11 +104,37 @@ init_error(Config) ->
     ok = ocpp_station:connect(StationId).
 
 boot_accepted() ->
-    [{doc,
-      "A boot request received by the station is accepted by the handler"},
-     {timetrap, 10000}].
+    [{doc, "A response with status \"Accepted\" is received "
+           "when the handler sets boot status to accepted."},
+     {timetrap, 5000}].
 boot_accepted(Config) ->
     StationId = ?config(stationid, Config),
+    do_boot_test(accept, StationId).
+
+boot_pending() ->
+    [{doc, "A response with status \"Pending\" is received "
+           "when the handler sets boot status to pending."},
+     {timetrap, 5000}].
+boot_pending(Config) ->
+    StationId = ?config(stationid, Config),
+    do_boot_test(pending, StationId).
+
+boot_rejected() ->
+    [{doc, "A response with status \"Rejected\" is received "
+           "when the handler sets boot status to rejected."},
+     {timetrap, 5000}].
+boot_rejected(Config) ->
+    StationId = ?config(stationid, Config),
+    do_boot_test(rejected, StationId).
+
+do_boot_test(accept, StationId) ->
+    do_boot_test(<<"ACCEPT">>, <<"Accepted">>, StationId);
+do_boot_test(pending, StationId) ->
+    do_boot_test(<<"PENDING">>, <<"Pending">>, StationId);
+do_boot_test(rejected, StationId) ->
+    do_boot_test(<<"REJECT">>, <<"Rejected">>, StationId).
+
+do_boot_test(Action, ExpectedStatus, StationId) ->
     ok = ocpp_station:connect(StationId),
     TimeStr = list_to_binary(
                 calendar:system_time_to_rfc3339(12345678, [{offset, "Z"}])),
@@ -119,19 +145,13 @@ boot_accepted(Config) ->
                 "vendorName" =>  <<"foo">>},
           "reason" => <<"PowerUp">>,
           "customData" =>
-              #{"testAction" => <<"ACCEPT">>,
+              #{"testAction" => Action,
                 "interval" => Interval,
                 "currentTime" => TimeStr,
                 "vendorId" => <<"foo">>}},
     Req = ocpp_message:new(<<"BootNotificationRequest">>, Payload),
     {ok, Response} = ocpp_station:rpc(StationId, Req),
-    ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response)),
+    ?assertEqual(ExpectedStatus, ocpp_message:get(<<"status">>, Response)),
     ?assertEqual(Interval, ocpp_message:get(<<"interval">>, Response)),
     ?assertEqual(ocpp_message:id(Req), ocpp_message:id(Response)),
     ?assertEqual(TimeStr, ocpp_message:get(<<"currentTime">>, Response)).
-
-boot_pending(_Config) ->
-    ?assert(false).
-
-boot_rejected(_Config) ->
-    ?assert(false).
