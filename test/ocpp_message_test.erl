@@ -45,6 +45,22 @@ get_nested_test_() ->
                ?assertEqual([1, 2, 3], ocpp_message:get(<<"foo">>, CustomData))
        end]}}.
 
+get_message_id_test_() ->
+    {"ocpp_message:id/1 returns the message id",
+     {setup, fun load_schemas/0, fun teardown_apps/1,
+      [fun() ->
+               MessageType = <<"CancelReservationRequest">>,
+               Payload = #{<<"reservationId">> => 123,
+                           <<"customData">> =>
+                               #{<<"foo">> => [1, 2, 3],
+                                 <<"vendorId">> => <<"this is the vendor id">>}},
+               MessageId = <<"abcdefg">>,
+               Message = ocpp_message:new(MessageType, Payload, MessageId),
+               CustomData = ocpp_message:get(<<"customData">>, Message),
+               ?assertEqual(<<"abcdefg">>, ocpp_message:id(Message)),
+               ?assertEqual(<<"abcdefg#/customData">>, ocpp_message:id(CustomData))
+       end]}}.
+
 construct_from_map() ->
     MessageType = <<"CancelReservationRequest">>,
     Payload = #{<<"reservationId">> => 123,

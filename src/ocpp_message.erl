@@ -1,6 +1,6 @@
 -module(ocpp_message).
 
--export([new/2, properties/1, get/2, get/3]).
+-export([new/2, new/3, properties/1, get/2, get/3, id/1, type/1]).
 
 -type payload() :: #{string() => jerk:primterm() | payload()}
                  | [{string(), jerk:primterm() | payload()}].
@@ -8,7 +8,7 @@
 -export_type([message/0, messageid/0]).
 
 -opaque message() :: {messageid(), jerk:jerkterm()}.
--type messageid() :: string().
+-type messageid() :: binary().
 
 -define(BASE_PATH, "urn:OCPP:Cp:2:2020:3").
 
@@ -20,27 +20,36 @@ properties({_, Message}) ->
 %% return a message fragment with an id equal to <<MessageId/binary,
 %% "#/", AttributeName>>. (e.g. "1235412deadbeef#/chargingStation")
 
--record(msgid, {id :: string(), path = [] :: [string()]}).
+-record(msgid, {id :: string(), path = [] :: [binary()]}).
+
+-spec type(Message :: message()) -> binary().
+type({MessageId, Message}) ->
+    Schema = jerk:id(Message),
+    hd(lists:reverse(binary:split(Schema, <<":">>, [global]))).
 
 -spec get(Key :: binary(), Message :: message()) -> jerk:primterm() | jerk:jerkterm().
 get(Key, {MessageId, Message}) ->
     get(string:split(Key, "/", all), decompose_msgid(MessageId), Message).
 
 decompose_msgid(MessageId) ->
-    case string:split(MessageId, "#/") of
+    case binary:split(MessageId, <<"#/">>) of
         [MessageId] ->
             #msgid{id = MessageId};
         [MsgId, Path] ->
-            #msgid{id = MsgId, path = string:split(Path, "/", all)}
+            #msgid{id = MsgId, path = [binary:split(Path, <<"/">>, [global])]}
     end.
 
 recompose_msgid(#msgid{id = Id, path = []}) ->
     Id;
 recompose_msgid(#msgid{id = Id, path = Path}) ->
-    string:join([Id, safejoin(Path, "/")], "#/").
+    FullPath = join(Path, <<"/">>),
+    <<Id/binary, "#/", FullPath/binary>>.
 
-safejoin(Strings, _Delimiter) when length(Strings) =:= 1 -> hd(Strings);
-safejoin(Strings, Delimiter) -> string:join(Strings, Delimiter).
+join([Bin|Binaries], Delimiter) ->
+    lists:foldl(
+      fun(X, Acc) ->
+              <<Acc/binary, Delimiter/binary, X/binary>>
+      end, <<Bin/binary>>, Binaries).
 
 get([], MessageId, Value) ->
     case jerk:is_object(Value) of
@@ -63,8 +72,14 @@ new(MessageType, Payload) ->
 %% invalid the call will fail with reason `badarg'
 -spec new(MessageType :: string(), Payload :: payload(), MessageId :: messageid()) ->
           message().
-new(MessageType, Payload, MessageId) ->
+new(MessageType, Payload, MessageId) when is_list(MessageId) ->
+    new(MessageType, Payload, list_to_binary(MessageId));
+new(MessageType, Payload, MessageId) when is_binary(MessageId) ->
     {MessageId, jerk:new(message_uri(MessageType), prepare_payload(Payload))}.
+
+%% @doc Return the message ID.
+-spec id(Message :: message()) -> messageid().
+id({Id, _}) -> Id.
 
 message_uri(MessageType) when is_list(MessageType) ->
     message_uri(list_to_binary(MessageType));
