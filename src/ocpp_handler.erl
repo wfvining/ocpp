@@ -27,8 +27,8 @@
                          'additionalInfo' => binary()}.
 
 -type boot_response() :: #{'status' := boot_status(),
-                           'interval' => non_neg_integer(),
-                           'currentTime' => calendar:datetime(),
+                           'interval' := non_neg_integer(),
+                           'currentTime' := calendar:datetime(),
                            'statusInfo' => status_info()}.
 
 -type handler_error() :: #{'ErrorCode' => binary(),
