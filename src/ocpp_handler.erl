@@ -9,74 +9,130 @@
 
 -behaviour(gen_event).
 
--export([start_link/1, add_handler/3, rpc_request/2, rpc_response/2]).
+-export([start_link/1, add_handler/3, rpc_request/2]).
 -export([init/1, handle_event/2, handle_call/2]).
 
--record(state, {handler_state :: any(), handler :: {module(), any()}}).
+-record(state, {handler_state :: any(),
+                init_arg :: any(),
+                mod :: module(),
+                stationid :: binary()}).
 
--type request() :: jerk:term().  % TODO
--type boot_status() :: accepted | pending | rejected.
+-type request() :: ocpp_message:message().
 
-%% @doc Either a string with the reasonCode (up to 20 characters) or a
-%% reasonCode and another string containing additional info (up to 512
-%% characters).
--type status_info() :: string()
-                     | {string(), string()}.
+%%% ========= OCPP Message-Related Types =========
+
+-type boot_status() :: 'Accepted' | 'Rejected' | 'Pending'.
+
+-type status_info() :: #{'reasonCode' := binary(),
+                         'additionalInfo' => binary()}.
+
+-type boot_response() :: #{'status' := boot_status(),
+                           'interval' => non_neg_integer(),
+                           'currentTime' => calendar:datetime(),
+                           'statusInfo' => status_info()}.
+
+-type handler_error() :: #{'ErrorCode' => binary(),
+                           'ErrorDescription' => binary(),
+                           'ErrorDetails' => #{binary() => any()}}.
+
+-type handler_ret(ResponseType) :: {reply, ResponseType, any()}
+                                 | {error, handler_error(), any()}.
+
+%%% ========= Callback Definitions =========
 
 %% @doc Initialize the handler state.
 -callback init(InitArg :: any()) -> {ok, State :: any()} | {error, Reason :: any()}.
 
-%% @doc Handle a BootNotificationRequest if the required OCPP options
-%% `interval' and `current_time' are not specified they will be
-%% set to `0' and the current time in UTC respectively.
--callback boot_notification(request()) ->
-    {boot_status(), [Option]}
-        when Option :: {interval, non_neg_integer()}
-                     | {current_time, calendar:datetime()}
-                     | {status_info, status_info()}.
-
--optional_callbacks([boot_notification/1]).
+%% @doc Handle a BootNotificationRequest.
+-callback boot_notification(Req :: request(), State :: any()) ->
+    handler_ret(boot_response()).
+-optional_callbacks([boot_notification/2]).
 
 -define(registry(Name), {via, gproc, ?name(Name)}).
 -define(name(Name), {n, l, {?MODULE, Name}}).
+
+%%% ========= Public API =========
 
 start_link(StationId) ->
     gen_event:start_link(?registry(StationId)).
 
 %% @doc Install the CSMS handler module as the handler for OCPP
 %% Messages.
--spec add_handler(Manager :: pid(),
+-spec add_handler(StationId :: binary(),
                   CallbackModule :: module(),
                   InitArg :: any()) -> gen_event:add_handler_ret().
-add_handler(Manager, CallbackModule, InitArg) ->
+add_handler(StationId, CallbackModule, InitArg) ->
     gen_event:add_sup_handler(
-      ?registry(Manager), ?MODULE, {CallbackModule, InitArg}).
+      ?registry(StationId), ?MODULE, {StationId, CallbackModule, InitArg}).
 
 %% @doc Notify the event manager that an RPC Request has been received.
--spec rpc_request(EventManager :: pid(), Request :: term()) -> ok.
-rpc_request(EventManager, Request) ->
-    gen_event:notify(EventManager, {rpc_request, Request}).
+-spec rpc_request(StationId :: binary(), Request :: term()) -> ok.
+rpc_request(StationId, Request) ->
+    gen_event:notify(?registry(StationId), {rpc_request, Request}).
 
-%% @doc Notify the event manager that an RPC Response has been received.
--spec rpc_response(EventManager :: pid(), Response :: term()) -> ok.
-rpc_response(EventManager, Response) ->
-    gen_event:notify(EventManager, {rpc_response, Response}).
+%%% ========= gen_event callbacks =========
 
-init({CallbackModule, InitArg} = Handler) ->
+init({StationId, CallbackModule, InitArg}) ->
     try CallbackModule:init(InitArg) of
         {ok, State} ->
             {ok, #state{handler_state = State,
-                        handler = Handler}};
+                        init_arg = InitArg,
+                        mod = CallbackModule,
+                        stationid = StationId}};
         {error, _} = Error ->
             Error
     catch error:Reason ->
             {error, {init, Reason}}
     end.
 
-handle_event(Event, State) ->
-    io:format("got event ~p while state is ~p~n", [Event, State]),
+handle_event({rpc_request, Message}, State) ->
+    case ocpp_message:type(Message) of
+        <<"BootNotificationRequest">> ->
+            NewState = do_request(boot_notification, Message, State),
+            {ok, NewState}
+    end,
     {ok, State}.
 
 handle_call(Call, State) ->
     io:format("got call ~p while state is ~p~n", [Call, State]),
     {ok, error, State}.
+
+%%% ========= Internal Functions =========
+
+do_request(boot_notification, Message,
+           #state{handler_state = HState, mod = Mod, stationid = StationId} = State) ->
+    try Mod:boot_notification(Message, HState) of
+        {reply, Response, NewHState} ->
+            MessageId = ocpp_message:id(Message),
+            ResponseMsg = ocpp_message:new(<<"BootNotificationResponse">>,
+                                           keys_to_binary(Response),
+                                           MessageId),
+            ocpp_station:reply(StationId, ResponseMsg),
+            State#state{ handler_state = NewHState};
+        {error, _, _} ->
+            %% TODO reply with internal_error
+            State
+    catch error:undef ->
+            %% TODO reply with a NotSupported error.
+            %% TODO handle errors from jerk here as well
+            error('callback not implemented');
+          error:Reason:Trace ->
+            %% TODO reply with internal_error
+            logger:error("Porcsesing boot notification failed: ~p~n"
+                         "Stack trace:~n~p~n",
+                         [Reason, Trace]),
+            exit(handler_error);
+          exit:_ ->
+            %% TODO reply with internal_error
+            exit(handler_exit)
+    end.
+
+keys_to_binary(Map) ->
+    maps:fold(
+      fun (Key, Value, Acc) ->
+              Val = if
+                        is_map(Value) -> keys_to_binary(Value);
+                        true -> Value
+                    end,
+              Acc#{atom_to_binary(Key) => Val}
+      end, #{}, Map).

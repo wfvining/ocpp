@@ -105,7 +105,8 @@ init_error(Config) ->
 
 boot_accepted() ->
     [{doc,
-      "A boot request received by the station is accepted by the handler"}].
+      "A boot request received by the station is accepted by the handler"},
+     {timetrap, 10000}].
 boot_accepted(Config) ->
     StationId = ?config(stationid, Config),
     ok = ocpp_station:connect(StationId),

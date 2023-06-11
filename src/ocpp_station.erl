@@ -7,7 +7,7 @@
 
 -behaviour(gen_statem).
 
--export([start_link/3, stop/1, handle_rpc/2, connect/1]).
+-export([start_link/3, stop/1, rpc/2, reply/2, connect/1]).
 
 -export([init/1, callback_mode/0, code_change/3, terminate/3]).
 
@@ -30,7 +30,9 @@
         {stationid :: binary(),
          connection = disconnected :: disconnected | {pid(), reference()},
          evse_sup :: undefined | pid(),
-         evse = [] :: [pid()]}).
+         evse = [] :: [pid()],
+         pending = undefined :: undefined
+                              | {ocpp_message:message_id(), gen_statem:from()}}).
 
 -spec start_link(StationId :: binary(),
                  NumEVSE :: pos_integer(),
@@ -43,17 +45,22 @@ start_link(StationId, NumEVSE, Supervisor) ->
 %% Connect the calling process to the station. Called by the process
 %% responsible for comminication with the physical charging station.
 %% @end
--spec connect(Station :: pid())
+-spec connect(Station :: binary())
              -> ok | {error, already_connected}.
 connect(Station) ->
     gen_statem:call(?registry(Station), {connect, self()}).
 
 %% @doc Handle an OCPP remote procedure call.
--spec handle_rpc(Station :: pid(), Request :: ocpp_request:request()) ->
-          {reply, Response :: map()} |
+-spec rpc(Station :: binary(), Request :: ocpp_message:message()) ->
+          {ok, Response :: ocpp_message:message()} |
           {error, Reason :: ocpp_rpc:rpcerror()}.
-handle_rpc(Station, Request) ->
+rpc(Station, Request) ->
    gen_statem:call(?registry(Station), {rpccall, Request}).
+
+-spec reply(StationId :: binary(), Response :: ocpp_message:message()) ->
+          ok.
+reply(StationId, Response) ->
+    gen_statem:cast(?registry(StationId), {reply, Response}).
 
 -spec stop(Station :: pid()) -> ok.
 stop(Station) ->
@@ -79,11 +86,35 @@ connected({call, From}, {connect, _}, _Data) ->
     {keep_state_and_data, [{reply, From, {error, already_connected}}]};
 connected(cast, disconnect, Data) ->
     {next_state, disconnected, cleanup_connection(Data)};
+connected({call, From}, {rpccall, Message}, Data) ->
+    NewData = Data#data{pending = {ocpp_message:id(Message), From}},
+    ocpp_handler:rpc_request(Data#data.stationid, Message),
+    {next_state, booting, NewData};
 connected(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
-booting(_, _, _) ->
-    error('not implemented').
+booting(cast, {reply, Response},
+        #data{pending = {MessageId, From}} = Data) ->
+    case ocpp_message:id(Response) of
+        MessageId ->
+            rpc_reply(From, Response),
+            NextState =
+                case ocpp_message:get(<<"status">>, Response) of
+                    <<"Accepted">> -> idle;
+                    <<"Rejected">> -> connected;
+                    <<"Pending">>  -> boot_pending
+                end,
+            {next_state, NextState, clear_pending_request(Data)};
+        ResponseMsgId ->
+            logger:notice(
+              "Received out of order response to message ~p "
+              "while awaiting response to message ~p.  "
+              "Message dropped.",
+              [ResponseMsgId, MessageId]),
+            keep_state_and_data
+    end;
+booting(EventType, Event, Data) ->
+    handle_event(EventType, Event, Data).
 
 boot_pending(_, _, _) ->
     error('not implemented').
@@ -123,7 +154,13 @@ setup_connection(Data, ConnectionPid) ->
 cleanup_connection(Data) ->
     Data#data{connection = disconnected}.
 
+clear_pending_request(Data) ->
+    Data#data{pending = undefined}.
+
 init_evse(_, 0) ->
     [];
 init_evse(EVSESup, N) ->
     [ocpp_evse_sup:start_evse(EVSESup, N)|init_evse(EVSESup, N - 1)].
+
+rpc_reply(ReplyTo, Message) ->
+    gen_server:reply(ReplyTo, {ok, Message}).
