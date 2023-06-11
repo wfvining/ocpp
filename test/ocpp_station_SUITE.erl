@@ -109,7 +109,8 @@ boot_accepted() ->
 boot_accepted(Config) ->
     StationId = ?config(stationid, Config),
     ok = ocpp_station:connect(StationId),
-    TimeStr = calendar:system_time_to_rfc3339(12345678, [{offset, "Z"}]),
+    TimeStr = list_to_binary(
+                calendar:system_time_to_rfc3339(12345678, [{offset, "Z"}])),
     Interval = 1234,
     Payload =
         #{"chargingStation" =>
@@ -119,12 +120,14 @@ boot_accepted(Config) ->
           "customData" =>
               #{"testAction" => <<"ACCEPT">>,
                 "interval" => Interval,
-                "currentTime" => list_to_binary(TimeStr),
-                "vendoeId" => <<"foo">>}},
-    Req = ocpp_message:new("BootNotificationRequest", Payload),
-    {ok, {accepted, Options}} = ocpp_station:rpc(StationId, Req),
-    ?assertEqual(Interval, proplists:get_value(interval, Options)),
-    ?assertEqual(TimeStr, proplists:get_value(current_time, Options)).
+                "currentTime" => TimeStr,
+                "vendorId" => <<"foo">>}},
+    Req = ocpp_message:new(<<"BootNotificationRequest">>, Payload),
+    {ok, Response} = ocpp_station:rpc(StationId, Req),
+    ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response)),
+    ?assertEqual(Interval, ocpp_message:get(<<"interval">>, Response)),
+    ?assertEqual(ocpp_message:id(Req), ocpp_message:id(Response)),
+    ?assertEqual(TimeStr, ocpp_message:get(<<"currentTime">>, Response)).
 
 boot_pending(_Config) ->
     ?assert(false).

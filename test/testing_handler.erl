@@ -11,8 +11,17 @@ init(_) ->
 
 boot_notification(Notification) ->
     CustomData = ocpp_message:get(<<"customData">>, Notification),
-    case jerk:get_value(CustomData, <<"testAction">>) of
-        <<"ACCEPT">>  -> accepted;
-        <<"REJECT">>  -> rejected;
-        <<"PENDING">> -> pending
-    end.
+    Response = case ocpp_message:get(<<"testAction">>, CustomData) of
+                   <<"ACCEPT">>  ->
+                       make_response(<<"Accepted">>, CustomData);
+                   <<"REJECT">>  ->
+                       make_response(<<"Rejected">>, CustomData);
+                   <<"PENDING">> ->
+                       make_response(<<"Pending">>, CustomData)
+               end,
+    {reply, Response, State}.
+
+make_response(Status, CustomData) ->
+    #{'status' => Status,
+      'interval' => ocpp_message:get(<<"interval">>, CustomData),
+      'currentTime' => ocpp_message:get(<<"currentTime">>, CustomData)}.
