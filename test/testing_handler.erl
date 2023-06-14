@@ -11,15 +11,16 @@ init(_) ->
 
 boot_notification(Notification, State) ->
     CustomData = ocpp_message:get(<<"customData">>, Notification),
-    Response = case ocpp_message:get(<<"testAction">>, CustomData) of
-                   <<"ACCEPT">>  ->
-                       make_response(<<"Accepted">>, CustomData);
-                   <<"REJECT">>  ->
-                       make_response(<<"Rejected">>, CustomData);
-                   <<"PENDING">> ->
-                       make_response(<<"Pending">>, CustomData)
-               end,
-    {reply, Response, State}.
+    case ocpp_message:get(<<"testAction">>, CustomData) of
+        <<"ACCEPT">>  ->
+            {reply, make_response(<<"Accepted">>, CustomData), State};
+        <<"REJECT">>  ->
+            {reply, make_response(<<"Rejected">>, CustomData), State};
+        <<"PENDING">> ->
+            {reply, make_response(<<"Pending">>, CustomData), State};
+        <<"ERROR">> ->
+            {error, ocpp_message:get(<<"errorReason">>, CustomData), State}
+    end.
 
 make_response(Status, CustomData) ->
     #{'status' => Status,

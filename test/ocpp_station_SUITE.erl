@@ -11,12 +11,18 @@
 
 all() ->
     [connect_station,
+     %% action_not_supported,
      {group, start},
      {group, handler}].
 
 groups() ->
     [{handler, [init_error, {group, boot_request}]},
-     {boot_request, [boot_accepted, boot_rejected, boot_pending]},
+     {boot_request, [boot_accepted, boot_rejected, boot_pending,
+                     {group, boot_error}]},
+     {boot_error, [ handler_error_return
+                  %% , handler_exit
+                  %% , handler_runtime_error
+                  ]},
      {start, [start_after_stop, start_twice]}].
 
 init_per_suite(Config) ->
@@ -155,3 +161,35 @@ do_boot_test(Action, ExpectedStatus, StationId) ->
     ?assertEqual(Interval, ocpp_message:get(<<"interval">>, Response)),
     ?assertEqual(ocpp_message:id(Req), ocpp_message:id(Response)),
     ?assertEqual(TimeStr, ocpp_message:get(<<"currentTime">>, Response)).
+
+handler_error_return() ->
+    [{doc, "When the handler returns an error it is returned "
+           "to the caller with the error information it provided."},
+     {timetrap, 5000}].
+handler_error_return(Config) ->
+    StationId = ?config(stationid, Config),
+    ok = ocpp_station:connect(StationId),
+    Payload =
+        #{"chargingStation" =>
+              #{"model" => <<"ct_model">>,
+                "vendorName" =>  <<"foo">>},
+          "reason" => <<"PowerUp">>,
+          "customData" =>
+              #{"testAction" => <<"ERROR">>,
+                "errorReason" => <<"because error">>,
+                "vendorId" => <<"handle_error_return">>}},
+    Req = ocpp_message:new(<<"BootNotificationRequest">>, Payload),
+    {error, Error} = ocpp_station:rpc(StationId, Req),
+    %% There are 4 components to an OCPP error:
+    %% 1. MessageId
+    %% 2. ErrorCode (NotSupported, InternalError...)
+    %% 3. ErrorDescription an informative string (also from the table?)
+    %% 4. ErrorDetails a JSON object.
+    ?assertEqual(ocpp_message:id(Req), ocpp_error:id(Error)),
+    ?assertEqual(<<"InternalError">>, ocpp_error:code(Error)),
+    ?assertEqual(<<"An internal error occurred and the receiver "
+                   "was not able to process the requested Action "
+                   "successfully">>,
+                 ocpp_error:description(Error)),
+    ?assertEqual(#{<<"reason">> => <<"because error">>},
+                 ocpp_error:details(Error)).

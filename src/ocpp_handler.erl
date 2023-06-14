@@ -109,19 +109,27 @@ do_request(boot_notification, Message,
                                            MessageId),
             ocpp_station:reply(StationId, ResponseMsg),
             State#state{ handler_state = NewHState};
-        {error, _, _} ->
-            %% TODO reply with internal_error
-            State
+        {error, Reason, NewHState} ->
+            Error = ocpp_error:new(
+                      ocpp_message:id(Message), 'InternalError',
+                      [{details, #{<<"reason">> => Reason}}]),
+            ocpp_station:error(StationId, Error),
+            State#state{handler_state = NewHState}
     catch error:undef ->
             %% TODO reply with a NotSupported error.
             %% TODO handle errors from jerk here as well
             error('callback not implemented');
           error:Reason:Trace ->
-            %% TODO reply with internal_error
-            logger:error("Porcsesing boot notification failed: ~p~n"
-                         "Stack trace:~n~p~n",
-                         [Reason, Trace]),
-            exit(handler_error);
+            logger:error("ocpp_handler ~p crashed.~n"
+                         "StationId: ~p~n"
+                         "Reason: ~p~n"
+                         "Message: ~p~n"
+                         "Handler State: ~p~n"
+                         "Stack trace: ~p~n",
+                         [Mod, StationId, Reason, Message, HState, Trace]),
+            Error = ocpp_error:new(ocpp_message:id(Message), 'InternalError'),
+            ocpp_station:error(StationId, Error),
+            error(ocpp_handler);
           exit:_ ->
             %% TODO reply with internal_error
             exit(handler_exit)

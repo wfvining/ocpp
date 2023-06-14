@@ -7,7 +7,7 @@
 
 -behaviour(gen_statem).
 
--export([start_link/3, stop/1, rpc/2, reply/2, connect/1]).
+-export([start_link/3, stop/1, rpc/2, reply/2, error/2, connect/1]).
 
 -export([init/1, callback_mode/0, code_change/3, terminate/3]).
 
@@ -57,10 +57,16 @@ connect(Station) ->
 rpc(Station, Request) ->
    gen_statem:call(?registry(Station), {rpccall, Request}).
 
+%% @doc Reply to an RPC call with a normal response.
 -spec reply(StationId :: binary(), Response :: ocpp_message:message()) ->
           ok.
 reply(StationId, Response) ->
     gen_statem:cast(?registry(StationId), {reply, Response}).
+
+%% @doc Reply to an RPC call with an error.
+-spec error(StationId :: binary(), Error :: ocpp_error:error()) -> ok.
+error(StationId, Error) ->
+    gen_statem:cast(?registry(StationId), {error, Error}).
 
 -spec stop(Station :: pid()) -> ok.
 stop(Station) ->
@@ -108,6 +114,20 @@ booting(cast, {reply, Response},
         ResponseMsgId ->
             logger:notice(
               "Received out of order response to message ~p "
+              "while awaiting response to message ~p.  "
+              "Message dropped.",
+              [ResponseMsgId, MessageId]),
+            keep_state_and_data
+    end;
+booting(cast, {error, Error},
+        #data{pending = {MessageId, From}} = Data) ->
+    case ocpp_error:id(Error) of
+        MessageId ->
+            rpc_error(From, Error),
+            {next_state, connected, clear_pending_request(Data)};
+        ResponseMsgId ->
+            logger:notice(
+              "Received out of order error for message ~p "
               "while awaiting response to message ~p.  "
               "Message dropped.",
               [ResponseMsgId, MessageId]),
@@ -163,4 +183,7 @@ init_evse(EVSESup, N) ->
     [ocpp_evse_sup:start_evse(EVSESup, N)|init_evse(EVSESup, N - 1)].
 
 rpc_reply(ReplyTo, Message) ->
-    gen_server:reply(ReplyTo, {ok, Message}).
+    gen_statem:reply(ReplyTo, {ok, Message}).
+
+rpc_error(ReplyTo, Error) ->
+    gen_statem:reply(ReplyTo, {error, Error}).
