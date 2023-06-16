@@ -19,7 +19,9 @@ boot_notification(Notification, State) ->
         <<"PENDING">> ->
             {reply, make_response(<<"Pending">>, CustomData), State};
         <<"ERROR">> ->
-            {error, ocpp_message:get(<<"errorReason">>, CustomData), State}
+            {error, ocpp_message:get(<<"errorReason">>, CustomData), State};
+        <<"CRASH">> ->
+            error(ocpp_message:get(<<"errorReason">>, CustomData))
     end.
 
 make_response(Status, CustomData) ->

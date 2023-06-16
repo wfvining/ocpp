@@ -21,7 +21,7 @@ groups() ->
                      {group, boot_error}]},
      {boot_error, [ handler_error_return
                   %% , handler_exit
-                  %% , handler_runtime_error
+                  , handler_error
                   ]},
      {start, [start_after_stop, start_twice]}].
 
@@ -200,5 +200,42 @@ handler_error_return(Config) ->
                               "interval" => 1,
                               "currentTime" => <<"2023-06-15T15:30.00Z">>,
                               "vendorId" => <<"handle_error_return">>}}),
+    {ok, Response} = ocpp_station:rpc(StationId, NewReq),
+    ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response)).
+
+handler_error() ->
+    [{doc, "When the handler fails by raising an error "
+           "an 'InternalError' is returned to the requestor."},
+     {timetrap, 5000}].
+handler_error(Config) ->
+    StationId = ?config(stationid, Config),
+    ok = ocpp_station:connect(StationId),
+    Payload =
+        #{"chargingStation" =>
+              #{"model" => <<"ct_model">>,
+                "vendorName" =>  <<"foo">>},
+          "reason" => <<"PowerUp">>,
+          "customData" =>
+              #{"testAction" => <<"CRASH">>,
+                "errorReason" => <<"because error/1">>,
+                "vendorId" => <<"handle_error">>}},
+    Req = ocpp_message:new(<<"BootNotificationRequest">>, Payload),
+    {error, Error} = ocpp_station:rpc(StationId, Req),
+    ?assertEqual(ocpp_message:id(Req), ocpp_error:id(Error)),
+    ?assertEqual(<<"InternalError">>, ocpp_error:code(Error)),
+    ?assertEqual(<<"An internal error occurred and the receiver "
+                   "was not able to process the requested Action "
+                   "successfully">>,
+                 ocpp_error:description(Error)),
+    ?assertEqual(#{<<"reason">> => <<"because error/1">>},
+                 ocpp_error:details(Error)),
+    NewReq = ocpp_message:new(
+               <<"BootNotificationRequest">>,
+               Payload#{"customData" =>
+                            #{"testAction" => <<"ACCEPT">>,
+                              "interval" => 1,
+                              "currentTime" => <<"2023-06-15T15:30.00Z">>,
+                              "vendorId" => <<"handle_error">>}}),
+    ct:log("trying new message..."),
     {ok, Response} = ocpp_station:rpc(StationId, NewReq),
     ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response)).

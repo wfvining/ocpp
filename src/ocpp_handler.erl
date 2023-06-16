@@ -127,9 +127,9 @@ do_request(boot_notification, Message,
                          "Handler State: ~p~n"
                          "Stack trace: ~p~n",
                          [Mod, StationId, Reason, Message, HState, Trace]),
-            Error = ocpp_error:new(ocpp_message:id(Message), 'InternalError'),
-            ocpp_station:error(StationId, Error),
-            error(ocpp_handler);
+            Error = ocpp_error:new(ocpp_message:id(Message), 'InternalError',
+                                   [{details, #{<<"reason">> => Reason}}]),
+            error({ocpp_handler_error, Error});
           exit:_ ->
             %% TODO reply with internal_error
             exit(handler_exit)
