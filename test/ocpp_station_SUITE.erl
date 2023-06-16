@@ -61,6 +61,7 @@ end_per_testcase(Config) ->
     SuperSup = ?config(supersup, Config),
     gen_server:stop(SuperSup),
     [application:stop(App) || App <- ?config(apps, Config)],
+    timer:sleep(100),
     Config.
 
 connect_station() ->
