@@ -21,7 +21,9 @@ boot_notification(Notification, State) ->
         <<"ERROR">> ->
             {error, ocpp_message:get(<<"errorReason">>, CustomData), State};
         <<"CRASH">> ->
-            error(ocpp_message:get(<<"errorReason">>, CustomData))
+            error(ocpp_message:get(<<"errorReason">>, CustomData));
+        <<"EXIT">> ->
+            exit(ocpp_message:get(<<"errorReason">>, CustomData))
     end.
 
 make_response(Status, CustomData) ->

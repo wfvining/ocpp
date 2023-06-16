@@ -119,7 +119,8 @@ do_request(boot_notification, Message,
             %% TODO reply with a NotSupported error.
             %% TODO handle errors from jerk here as well
             error('callback not implemented');
-          error:Reason:Trace ->
+          Exception:Reason:Trace when Exception =:= error;
+                                      Exception =:= exit ->
             logger:error("ocpp_handler ~p crashed.~n"
                          "StationId: ~p~n"
                          "Reason: ~p~n"
@@ -129,10 +130,7 @@ do_request(boot_notification, Message,
                          [Mod, StationId, Reason, Message, HState, Trace]),
             Error = ocpp_error:new(ocpp_message:id(Message), 'InternalError',
                                    [{details, #{<<"reason">> => Reason}}]),
-            error({ocpp_handler_error, Error});
-          exit:_ ->
-            %% TODO reply with internal_error
-            exit(handler_exit)
+            error({ocpp_handler_error, Error})
     end.
 
 keys_to_binary(Map) ->

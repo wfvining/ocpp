@@ -19,10 +19,7 @@ groups() ->
     [{handler, [init_error, {group, boot_request}]},
      {boot_request, [boot_accepted, boot_rejected, boot_pending,
                      {group, boot_error}]},
-     {boot_error, [ handler_error_return
-                  %% , handler_exit
-                  , handler_error
-                  ]},
+     {boot_error, [handler_error_return, handler_exit, handler_error]},
      {start, [start_after_stop, start_twice]}].
 
 init_per_suite(Config) ->
@@ -193,15 +190,7 @@ handler_error_return(Config) ->
                  ocpp_error:description(Error)),
     ?assertEqual(#{<<"reason">> => <<"because error">>},
                  ocpp_error:details(Error)),
-    NewReq = ocpp_message:new(
-               <<"BootNotificationRequest">>,
-               Payload#{"customData" =>
-                            #{"testAction" => <<"ACCEPT">>,
-                              "interval" => 1,
-                              "currentTime" => <<"2023-06-15T15:30.00Z">>,
-                              "vendorId" => <<"handle_error_return">>}}),
-    {ok, Response} = ocpp_station:rpc(StationId, NewReq),
-    ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response)).
+    test_new_boot_request_works(StationId, Payload).
 
 handler_error() ->
     [{doc, "When the handler fails by raising an error "
@@ -229,6 +218,36 @@ handler_error(Config) ->
                  ocpp_error:description(Error)),
     ?assertEqual(#{<<"reason">> => <<"because error/1">>},
                  ocpp_error:details(Error)),
+    test_new_boot_request_works(StationId, Payload).
+
+handler_exit() ->
+    [{doc, "When the handler exits the an 'InternalError' is "
+           "returned to the requestor."},
+     {timetrap, 5000}].
+handler_exit(Config) ->
+    StationId = ?config(stationid, Config),
+    ok = ocpp_station:connect(StationId),
+    Payload =
+        #{"chargingStation" =>
+              #{"model" => <<"ct_model">>,
+                "vendorName" =>  <<"foo">>},
+          "reason" => <<"PowerUp">>,
+          "customData" =>
+              #{"testAction" => <<"EXIT">>,
+                "errorReason" => <<"because exit/1">>,
+                "vendorId" => <<"handle_exit">>}},
+    Req = ocpp_message:new(<<"BootNotificationRequest">>, Payload),
+    {error, Error} = ocpp_station:rpc(StationId, Req),
+        ?assertEqual(ocpp_message:id(Req), ocpp_error:id(Error)),
+    ?assertEqual(<<"InternalError">>, ocpp_error:code(Error)),
+    ?assertEqual(<<"An internal error occurred and the receiver "
+                   "was not able to process the requested Action "
+                   "successfully">>,
+                 ocpp_error:description(Error)),
+    ?assertEqual(#{<<"reason">> => <<"because exit/1">>}, ocpp_error:details(Error)),
+    test_new_boot_request_works(StationId, Payload).
+
+test_new_boot_request_works(StationId, Payload) ->
     NewReq = ocpp_message:new(
                <<"BootNotificationRequest">>,
                Payload#{"customData" =>
