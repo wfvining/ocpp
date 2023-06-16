@@ -192,4 +192,13 @@ handler_error_return(Config) ->
                    "successfully">>,
                  ocpp_error:description(Error)),
     ?assertEqual(#{<<"reason">> => <<"because error">>},
-                 ocpp_error:details(Error)).
+                 ocpp_error:details(Error)),
+    NewReq = ocpp_message:new(
+               <<"BootNotificationRequest">>,
+               Payload#{"customData" =>
+                            #{"testAction" => <<"ACCEPT">>,
+                              "interval" => 1,
+                              "currentTime" => <<"2023-06-15T15:30.00Z">>,
+                              "vendorId" => <<"handle_error_return">>}}),
+    {ok, Response} = ocpp_station:rpc(StationId, NewReq),
+    ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response)).
