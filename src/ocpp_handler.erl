@@ -9,7 +9,7 @@
 
 -behaviour(gen_event).
 
--export([start_link/1, add_handler/3, rpc_request/2]).
+-export([start_link/1, add_handler/3, add_handler/4, rpc_request/2]).
 -export([init/1, handle_event/2, handle_call/2]).
 
 -record(state, {handler_state :: any(),
@@ -65,6 +65,16 @@ add_handler(StationId, CallbackModule, InitArg) ->
     gen_event:add_sup_handler(
       ?registry(StationId), ?MODULE, {StationId, CallbackModule, InitArg}).
 
+%% @doc Re-install the handler after a crash.
+-spec add_handler(StationId :: binary(),
+                  CallbackModule :: module(),
+                  InitArg :: any(),
+                  Reason :: ocpp_error:error()) -> gen_event:add_handler_ret().
+add_handler(StationId, CallbackModule, InitArg, Reason) ->
+    gen_event:add_sup_handler(
+      ?registry(StationId), ?MODULE,
+      {recover, Reason, {StationId, CallbackModule, InitArg}}).
+
 %% @doc Notify the event manager that an RPC Request has been received.
 -spec rpc_request(StationId :: binary(), Request :: term()) -> ok.
 rpc_request(StationId, Request) ->
@@ -72,6 +82,9 @@ rpc_request(StationId, Request) ->
 
 %%% ========= gen_event callbacks =========
 
+init({recover, Reason, {StationId, _, _} = InitArg}) ->
+    ocpp_station:error(StationId, Reason),
+    init(InitArg);
 init({StationId, CallbackModule, InitArg}) ->
     try CallbackModule:init(InitArg) of
         {ok, State} ->

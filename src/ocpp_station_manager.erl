@@ -44,15 +44,13 @@ handle_cast(Cast, State) ->
     {noreply, State}.
 
 handle_info({gen_event_EXIT, ocpp_handler,
-             {'EXIT', {{ocpp_handler_error, ErrorMsg}, _}}},
+             {'EXIT', {{ocpp_handler_error, Reason}, _}}},
             #state{handler = {Handler, InitArg},
                    handler_crashes = Crashes} = State) ->
     case ocpp_handler:add_handler(
-           State#state.stationid, Handler, InitArg)
+           State#state.stationid, Handler, InitArg, Reason)
     of
         ok ->
-            ocpp_station:error(State#state.stationid, ErrorMsg),
-            timer:sleep(100),
             {noreply, State#state{ handler_crashes = Crashes + 1}};
         {ErrType, Reason} when ErrType =:= error;
                                ErrType =:= 'EXIT' ->
