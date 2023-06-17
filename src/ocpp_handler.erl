@@ -10,6 +10,7 @@
 -behaviour(gen_event).
 
 -export([start_link/1, add_handler/3, add_handler/4, rpc_request/2]).
+-export([station_connected/1, station_disconnected/1]).
 -export([init/1, handle_event/2, handle_call/2]).
 
 -record(state, {handler_state :: any(),
@@ -43,10 +44,14 @@
 %% @doc Initialize the handler state.
 -callback init(InitArg :: any()) -> {ok, State :: any()} | {error, Reason :: any()}.
 
+%% @doc Handle events that are not OCPP messages.
+-callback handle_info(any(), State :: any()) -> {ok, NewState :: any()}.
+
 %% @doc Handle a BootNotificationRequest.
 -callback boot_notification(Req :: request(), State :: any()) ->
     handler_ret(boot_response()).
--optional_callbacks([boot_notification/2]).
+
+-optional_callbacks([boot_notification/2, handle_info/2]).
 
 -define(registry(Name), {via, gproc, ?name(Name)}).
 -define(name(Name), {n, l, {?MODULE, Name}}).
@@ -80,6 +85,14 @@ add_handler(StationId, CallbackModule, InitArg, Reason) ->
 rpc_request(StationId, Request) ->
     gen_event:notify(?registry(StationId), {rpc_request, Request}).
 
+-spec station_connected(StationId :: binary()) -> ok.
+station_connected(StationId) ->
+    gen_event:notify(?registry(StationId), station_connected).
+
+-spec station_disconnected(StationId :: binary()) -> ok.
+station_disconnected(StationId) ->
+    gen_event:notify(?registry(StationId), station_disconnected).
+
 %%% ========= gen_event callbacks =========
 
 init({recover, Reason, {StationId, _, _} = InitArg}) ->
@@ -101,7 +114,15 @@ init({StationId, CallbackModule, InitArg}) ->
 handle_event({rpc_request, Message}, State) ->
     RequestFun = request_fun(ocpp_message:type(Message)),
     NewState = do_request(RequestFun, Message, State),
-    {ok, NewState}.
+    {ok, NewState};
+handle_event(Event, #state{mod = Mod, handler_state = HState} = State) ->
+    try Mod:handle_info(Event, HState) of
+        {ok, NewState} ->
+            {ok, State#state{ handler_state = NewState }}
+    catch
+        error:undef ->
+            {ok, State}
+    end.
 
 request_fun(<<"BootNotificationRequest">>) -> boot_notification;
 request_fun(<<"Get15118EVCertificateRequest">>) -> get_15118_ev_certificate.

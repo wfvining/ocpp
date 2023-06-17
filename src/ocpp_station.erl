@@ -188,9 +188,11 @@ handle_event(info, {'DOWN', Ref, process, Pid, _},
 
 setup_connection(Data, ConnectionPid) ->
     Ref = monitor(process, ConnectionPid),
+    ocpp_handler:station_connected(Data#data.stationid),
     Data#data{connection = {ConnectionPid, Ref}}.
 
 cleanup_connection(#data{connection = {_, Ref}} = Data) ->
+    ocpp_handler:station_disconnected(Data#data.stationid),
     erlang:demonitor(Ref),
     Data#data{connection = disconnected}.
 
