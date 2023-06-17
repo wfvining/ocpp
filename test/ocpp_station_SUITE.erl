@@ -22,7 +22,7 @@ groups() ->
                      {group, boot_error}]},
      {boot_error, [handler_error_return, handler_exit, handler_error]},
      {start, [start_after_stop, start_twice]},
-     {disconnect, [disconnect_after_accept]}].
+     {disconnect, [disconnect_after_accept, disconnect_before_request]}].
 
 init_per_suite(Config) ->
     application:ensure_all_started(jerk),
@@ -268,8 +268,6 @@ disconnect_after_accept() ->
      {timetrap, 5000}].
 disconnect_after_accept(Config) ->
     Station = ?config(stationid, Config),
-    CustomData = #{"vendorId" => <<"disconnect_after_accept">>,
-                   "testAction" => <<"ACCEPT">>},
     F = fun () ->
                 ok = ocpp_station:connect(Station),
                 {ok, Response} =
@@ -290,8 +288,25 @@ disconnect_after_accept(Config) ->
                                         12341234,
                                         [{offset, "Z"}])),
                                 "vendorId" => <<"disconnect_after_accept">>}})),
-                ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response)),
-                timer:sleep(100)
+                ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response))
+        end,
+    {Pid, Ref} = spawn_monitor(F),
+    receive
+        {'DOWN', Ref, process, Pid, normal} ->
+            ok = ocpp_station:connect(Station);
+        {'DOWN', Ref, process, Pid, Reason} ->
+            ct:log("Initial connected process failed: ~p", Reason),
+            ct:abort_current_testcase(Reason)
+    end.
+
+disconnect_before_request() ->
+    [{doc, "Before making a request the station disconnects and a "
+           "different process can connect."},
+     {timetrap, 5000}].
+disconnect_before_request(Config) ->
+    Station = ?config(stationid, Config),
+    F = fun () ->
+                ok = ocpp_station:connect(Station)
         end,
     {Pid, Ref} = spawn_monitor(F),
     receive
