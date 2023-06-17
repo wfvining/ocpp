@@ -93,8 +93,7 @@ connected({call, From}, {connect, _}, _Data) ->
 connected(cast, disconnect, Data) ->
     {next_state, disconnected, cleanup_connection(Data)};
 connected({call, From}, {rpccall, Message}, Data) ->
-    NewData = Data#data{pending = {ocpp_message:id(Message), From}},
-    ocpp_handler:rpc_request(Data#data.stationid, Message),
+    NewData = handle_rpccall(Message, From , Data),
     {next_state, booting, NewData};
 connected(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
@@ -143,6 +142,17 @@ boot_pending(cast, disconnect, Data) ->
 boot_pending(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
+idle({call, From}, {rpccall, Message}, Data) ->
+    NewData = handle_rpccall(Message, From, Data),
+    {next_state, idle, NewData};
+idle(cast, {error, Error}, #data{pending = {MessageId, From}} = Data) ->
+    case ocpp_error:id(Error) of
+        MessageId ->
+            rpc_error(From, Error),
+            {next_state, idle, clear_pending_request(Data)};
+        _ ->
+            keep_state_and_data
+    end;
 idle(cast, disconnect, Data) ->
     {next_state, offline, cleanup_connection(Data)};
 idle(EventType, Event, Data) ->
@@ -183,6 +193,10 @@ setup_connection(Data, ConnectionPid) ->
 cleanup_connection(#data{connection = {_, Ref}} = Data) ->
     erlang:demonitor(Ref),
     Data#data{connection = disconnected}.
+
+handle_rpccall(Message, From, Data) ->
+    ocpp_handler:rpc_request(Data#data.stationid, Message),
+    Data#data{pending = {ocpp_message:id(Message), From}}.
 
 clear_pending_request(Data) ->
     Data#data{pending = undefined}.

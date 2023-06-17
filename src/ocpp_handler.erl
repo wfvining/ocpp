@@ -99,12 +99,15 @@ init({StationId, CallbackModule, InitArg}) ->
     end.
 
 handle_event({rpc_request, Message}, State) ->
-    case ocpp_message:type(Message) of
-        <<"BootNotificationRequest">> ->
-            NewState = do_request(boot_notification, Message, State),
-            {ok, NewState}
-    end,
-    {ok, State}.
+    RequestFun = request_fun(ocpp_message:type(Message)),
+    NewState = do_request(RequestFun, Message, State),
+    {ok, NewState}.
+
+request_fun(<<"BootNotificationRequest">>) -> boot_notification;
+request_fun(<<"Get15118EVCertificateRequest">>) -> get_15118_ev_certificate.
+
+response_type(boot_notification) -> <<"BootNotificationResponse">>;
+response_type(get_15118_ev_certificate) -> <<"Get1511EVCertificateResponse">>.
 
 handle_call(Call, State) ->
     io:format("got call ~p while state is ~p~n", [Call, State]),
@@ -112,12 +115,12 @@ handle_call(Call, State) ->
 
 %%% ========= Internal Functions =========
 
-do_request(boot_notification, Message,
+do_request(RequestFun, Message,
            #state{handler_state = HState, mod = Mod, stationid = StationId} = State) ->
-    try Mod:boot_notification(Message, HState) of
+    try Mod:RequestFun(Message, HState) of
         {reply, Response, NewHState} ->
             MessageId = ocpp_message:id(Message),
-            ResponseMsg = ocpp_message:new(<<"BootNotificationResponse">>,
+            ResponseMsg = ocpp_message:new(response_type(RequestFun),
                                            keys_to_binary(Response),
                                            MessageId),
             ocpp_station:reply(StationId, ResponseMsg),
@@ -129,9 +132,10 @@ do_request(boot_notification, Message,
             ocpp_station:error(StationId, Error),
             State#state{handler_state = NewHState}
     catch error:undef ->
-            %% TODO reply with a NotSupported error.
-            %% TODO handle errors from jerk here as well
-            error('callback not implemented');
+            ocpp_station:error(
+              StationId,
+              ocpp_error:new(ocpp_message:id(Message), 'NotSupported')),
+            State;
           Exception:Reason:Trace when Exception =:= error;
                                       Exception =:= exit ->
             logger:error("ocpp_handler ~p crashed.~n"

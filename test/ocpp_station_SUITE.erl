@@ -11,7 +11,7 @@
 
 all() ->
     [connect_station,
-     %% action_not_supported,
+     not_supported_error,
      {group, start},
      {group, disconnect},
      {group, handler}].
@@ -39,6 +39,9 @@ init_per_suite(Config) ->
     ok = jerk:load_schema(
            filename:join(
              [PrivDir, "json_schemas", "BootNotificationResponse.json"])),
+    ok = jerk:load_schema(
+           filename:join(
+             [PrivDir, "json_schemas", "Get15118EVCertificateRequest.json"])),
     Config.
 
 end_per_suite(Config) ->
@@ -387,3 +390,42 @@ disconnect_during_request(Config) ->
             ct:log("Unnexepcted message received in test case"),
             ct:fail('unnexpected message')
     end.
+
+not_supported_error() ->
+    [{doc, "When a request is received that is not implemented "
+           "by the handler callback module it responds with a "
+           "not implemented error. "},
+     {timetrap, 5000}].
+not_supported_error(Config) ->
+    Station = ?config(stationid, Config),
+    Msg = <<"Get15118EVCertificateRequest">>,
+    Req = #{"iso15118SchemaVersion" => <<"1">>,
+            "action" => <<"Install">>,
+            "exiRequest" => <<"abcdefg">>},
+    ok = ocpp_station:connect(Station),
+    boot_station(Station, <<"ACCEPT">>),
+    {error, Response} = ocpp_station:rpc(Station, ocpp_message:new(Msg, Req)),
+    ?assertEqual(<<"NotSupported">>, ocpp_error:code(Response)).
+
+boot_station(Station, Action) ->
+    {ok, Response} =
+        ocpp_station:rpc(
+          Station,
+          ocpp_message:new(
+            <<"BootNotificationRequest">>,
+            #{"chargingStation" =>
+                  #{"model" => <<"ct_model">>,
+                    "vendorName" =>  <<"foo">>},
+              "reason" => <<"PowerUp">>,
+              "customData" =>
+                  #{"testAction" => Action,
+                    "interval" => 1,
+                    "currentTime" =>
+                        list_to_binary(
+                          calendar:system_time_to_rfc3339(
+                            12341234,
+                            [{offset, "Z"}])),
+                    "vendorId" => <<"disconnect_after_x">>}})),
+    ?assertEqual(
+       action_to_status(Action),
+       ocpp_message:get(<<"status">>, Response)).
