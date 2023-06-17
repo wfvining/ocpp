@@ -136,6 +136,8 @@ booting(cast, {error, Error},
 booting(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
+boot_pending(cast, disconnect, Data) ->
+    {next_state, disconnected, cleanup_connection(Data)};
 boot_pending(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 

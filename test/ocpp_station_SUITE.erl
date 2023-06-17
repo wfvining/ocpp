@@ -22,7 +22,10 @@ groups() ->
                      {group, boot_error}]},
      {boot_error, [handler_error_return, handler_exit, handler_error]},
      {start, [start_after_stop, start_twice]},
-     {disconnect, [disconnect_after_accept, disconnect_before_request]}].
+     {disconnect, [{group, disconnect_after}, disconnect_before_request]},
+     {disconnect_after, [disconnect_after_accept,
+                         disconnect_after_pending,
+                         disconnect_after_reject]}].
 
 init_per_suite(Config) ->
     application:ensure_all_started(jerk),
@@ -268,6 +271,21 @@ disconnect_after_accept() ->
      {timetrap, 5000}].
 disconnect_after_accept(Config) ->
     Station = ?config(stationid, Config),
+    disconnect_after_x(Station, <<"ACCEPT">>).
+
+disconnect_after_reject() ->
+    [{timetrap, 5000}].
+disconnect_after_reject(Config) ->
+    Station = ?config(stationid, Config),
+    disconnect_after_x(Station, <<"REJECT">>).
+
+disconnect_after_pending() ->
+    [{timetrap, 5000}].
+disconnect_after_pending(Config) ->
+    Station = ?config(stationid, Config),
+    disconnect_after_x(Station, <<"PENDING">>).
+
+disconnect_after_x(Station, TestAction) ->
     F = fun () ->
                 ok = ocpp_station:connect(Station),
                 {ok, Response} =
@@ -280,15 +298,17 @@ disconnect_after_accept(Config) ->
                                 "vendorName" =>  <<"foo">>},
                           "reason" => <<"PowerUp">>,
                           "customData" =>
-                              #{"testAction" => <<"ACCEPT">>,
+                              #{"testAction" => TestAction,
                                 "interval" => 1,
                                 "currentTime" =>
                                     list_to_binary(
                                       calendar:system_time_to_rfc3339(
                                         12341234,
                                         [{offset, "Z"}])),
-                                "vendorId" => <<"disconnect_after_accept">>}})),
-                ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response))
+                                "vendorId" => <<"disconnect_after_x">>}})),
+                ?assertEqual(
+                   action_to_status(TestAction),
+                   ocpp_message:get(<<"status">>, Response))
         end,
     {Pid, Ref} = spawn_monitor(F),
     receive
@@ -298,6 +318,10 @@ disconnect_after_accept(Config) ->
             ct:log("Initial connected process failed: ~p", Reason),
             ct:abort_current_testcase(Reason)
     end.
+
+action_to_status(<<"ACCEPT">>)  -> <<"Accepted">>;
+action_to_status(<<"REJECT">>)  -> <<"Rejected">>;
+action_to_status(<<"PENDING">>) -> <<"Pending">>.
 
 disconnect_before_request() ->
     [{doc, "Before making a request the station disconnects and a "
