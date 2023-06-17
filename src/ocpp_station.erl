@@ -99,6 +99,8 @@ connected({call, From}, {rpccall, Message}, Data) ->
 connected(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
+booting(cast, disconnect, Data) ->
+    {next_state, disconnected, cleanup_connection(Data)};
 booting(cast, {reply, Response},
         #data{pending = {MessageId, From}} = Data) ->
     case ocpp_message:id(Response) of

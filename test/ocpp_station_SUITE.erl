@@ -22,7 +22,9 @@ groups() ->
                      {group, boot_error}]},
      {boot_error, [handler_error_return, handler_exit, handler_error]},
      {start, [start_after_stop, start_twice]},
-     {disconnect, [{group, disconnect_after}, disconnect_before_request]},
+     {disconnect, [{group, disconnect_after},
+                   disconnect_before_request,
+                   disconnect_during_request]},
      {disconnect_after, [disconnect_after_accept,
                          disconnect_after_pending,
                          disconnect_after_reject]}].
@@ -339,4 +341,49 @@ disconnect_before_request(Config) ->
         {'DOWN', Ref, process, Pid, Reason} ->
             ct:log("Initial connected process failed: ~p", Reason),
             ct:abort_current_testcase(Reason)
+    end.
+
+disconnect_during_request() ->
+    [{doc, "If the station disconnects and reconnects while its previous "
+           "request is still being processed, the CSMS response to the "
+           "previous request is dropped and only the response to a new request "
+           "is received by the station."},
+     {timetrap, 10000}].
+disconnect_during_request(Config) ->
+    Station = ?config(stationid, Config),
+    CustomData = #{"testAction" => <<"REJECT">>,
+                   "interval" => 1,
+                   "currentTime" =>
+                       list_to_binary(
+                         calendar:system_time_to_rfc3339(
+                           12341234,
+                           [{offset, "Z"}])),
+                   "vendorId" => <<"disconnect_during_request">>},
+    Req = #{"chargingStation" =>
+                #{"model" => <<"ct_model">>,
+                  "vendorName" =>  <<"foo">>},
+            "reason" => <<"PowerUp">>,
+            "customData" => CustomData#{"delay" => 1000}},
+    F = fun() ->
+                ok = ocpp_station:connect(Station),
+                {ok, _Response} =
+                    ocpp_station:rpc(
+                      Station, ocpp_message:new(<<"BootNotificationRequest">>, Req))
+        end,
+    {Pid, Ref} = spawn_monitor(F),
+    timer:sleep(100),
+    exit(Pid, 'time to die'),
+    receive
+        {'DOWN', Ref, process, Pid, 'time to die'} ->
+            %% Do new connection and request
+            ok = ocpp_station:connect(Station),
+            Msg = ocpp_message:new(
+                    <<"BootNotificationRequest">>,
+                    Req#{"customData" =>
+                             CustomData#{"testAction" => <<"ACCEPT">>}}),
+            {ok, Response} = ocpp_station:rpc(Station, Msg),
+            ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response));
+        _ ->
+            ct:log("Unnexepcted message received in test case"),
+            ct:fail('unnexpected message')
     end.
