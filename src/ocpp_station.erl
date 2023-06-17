@@ -136,26 +136,31 @@ booting(cast, {error, Error},
 booting(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
-boot_pending(_, _, _) ->
-    error('not implemented').
+boot_pending(EventType, Event, Data) ->
+    handle_event(EventType, Event, Data).
 
-idle(_, _, _) ->
-    error('not implemented').
+idle(cast, disconnect, Data) ->
+    {next_state, offline, cleanup_connection(Data)};
+idle(EventType, Event, Data) ->
+    handle_event(EventType, Event, Data).
 
-offline(_, _, _) ->
-    error('not implemented').
+offline({call, From}, {connect, Pid}, Data) ->
+    {next_state, reconnecting, setup_connection(Data, Pid),
+     [{reply, From, ok}]};
+offline(EventType, Event, Data) ->
+    handle_event(EventType, Event, Data).
 
-reconnecting(_, _, _) ->
-    error('not implemented').
+reconnecting(EventType, Event, Data) ->
+    handle_event(EventType, Event, Data).
 
-resetting(_, _, _) ->
-    error('not implemented').
+resetting(EventType, Event, Data) ->
+    handle_event(EventType, Event, Data).
 
-reset_accepted(_, _, _) ->
-    error('not implemented').
+reset_accepted(EventType, Event, Data) ->
+    handle_event(EventType, Event, Data).
 
-reset_scheduled(_, _, _) ->
-    error('not implemented').
+reset_scheduled(EventType, Event, Data) ->
+    handle_event(EventType, Event, Data).
 
 code_change(_OldVsn, _NewVsn, Data) ->
     {ok, Data}.
@@ -171,7 +176,8 @@ setup_connection(Data, ConnectionPid) ->
     Ref = monitor(process, ConnectionPid),
     Data#data{connection = {ConnectionPid, Ref}}.
 
-cleanup_connection(Data) ->
+cleanup_connection(#data{connection = {_, Ref}} = Data) ->
+    erlang:demonitor(Ref),
     Data#data{connection = disconnected}.
 
 clear_pending_request(Data) ->

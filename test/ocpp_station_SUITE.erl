@@ -13,6 +13,7 @@ all() ->
     [connect_station,
      %% action_not_supported,
      {group, start},
+     {group, disconnect},
      {group, handler}].
 
 groups() ->
@@ -20,7 +21,8 @@ groups() ->
      {boot_request, [boot_accepted, boot_rejected, boot_pending,
                      {group, boot_error}]},
      {boot_error, [handler_error_return, handler_exit, handler_error]},
-     {start, [start_after_stop, start_twice]}].
+     {start, [start_after_stop, start_twice]},
+     {disconnect, [disconnect_after_accept]}].
 
 init_per_suite(Config) ->
     application:ensure_all_started(jerk),
@@ -259,3 +261,43 @@ test_new_boot_request_works(StationId, Payload) ->
     ct:log("trying new message..."),
     {ok, Response} = ocpp_station:rpc(StationId, NewReq),
     ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response)).
+
+disconnect_after_accept() ->
+    [{doc, "After being accepted the station disconnects and a "
+           "different process can connect."},
+     {timetrap, 5000}].
+disconnect_after_accept(Config) ->
+    Station = ?config(stationid, Config),
+    CustomData = #{"vendorId" => <<"disconnect_after_accept">>,
+                   "testAction" => <<"ACCEPT">>},
+    F = fun () ->
+                ok = ocpp_station:connect(Station),
+                {ok, Response} =
+                    ocpp_station:rpc(
+                      Station,
+                      ocpp_message:new(
+                        <<"BootNotificationRequest">>,
+                        #{"chargingStation" =>
+                              #{"model" => <<"ct_model">>,
+                                "vendorName" =>  <<"foo">>},
+                          "reason" => <<"PowerUp">>,
+                          "customData" =>
+                              #{"testAction" => <<"ACCEPT">>,
+                                "interval" => 1,
+                                "currentTime" =>
+                                    list_to_binary(
+                                      calendar:system_time_to_rfc3339(
+                                        12341234,
+                                        [{offset, "Z"}])),
+                                "vendorId" => <<"disconnect_after_accept">>}})),
+                ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response)),
+                timer:sleep(100)
+        end,
+    {Pid, Ref} = spawn_monitor(F),
+    receive
+        {'DOWN', Ref, process, Pid, normal} ->
+            ok = ocpp_station:connect(Station);
+        {'DOWN', Ref, process, Pid, Reason} ->
+            ct:log("Initial connected process failed: ~p", Reason),
+            ct:abort_current_testcase(Reason)
+    end.
