@@ -246,8 +246,8 @@ heartbeat_response() ->
       #{"currentTime" =>
             list_to_binary(
               calendar:system_time_to_rfc3339(
-                erlang:system_time(),
-                [{offset, "Z"}, {unit, native}]))}).
+                erlang:system_time(second),
+                [{offset, "Z"}, {unit, second}]))}).
 
 init_evse(EVSE) ->
     maps:from_list(lists:zip(lists:seq(1, length(EVSE)), EVSE)).
