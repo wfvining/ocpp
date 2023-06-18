@@ -7,7 +7,7 @@
 
 -behaviour(gen_statem).
 
--export([start_link/3, stop/1, rpc/2, reply/2, error/2, connect/1]).
+-export([start_link/2, stop/1, rpc/2, reply/2, error/2, connect/1]).
 
 -export([init/1, callback_mode/0, code_change/3, terminate/3]).
 
@@ -16,6 +16,7 @@
          connected/3,
          booting/3,
          boot_pending/3,
+         provisioning/3,
          idle/3,
          offline/3,
          reconnecting/3,
@@ -29,17 +30,15 @@
 -record(data,
         {stationid :: binary(),
          connection = disconnected :: disconnected | {pid(), reference()},
-         evse_sup :: undefined | pid(),
-         evse = [] :: [pid()],
+         evse = #{} :: #{pos_integer() => ocpp_evse:evse()},
          pending = undefined :: undefined
                               | {ocpp_message:message_id(), gen_statem:from()}}).
 
 -spec start_link(StationId :: binary(),
-                 NumEVSE :: pos_integer(),
-                 Supervisor :: pid()) -> gen_statem:start_ret().
-start_link(StationId, NumEVSE, Supervisor) ->
+                 EVSE :: [ocpp_evse:evse()]) -> gen_statem:start_ret().
+start_link(StationId, EVSE) ->
     gen_statem:start_link(
-      ?registry(StationId), ?MODULE, {StationId, NumEVSE, Supervisor}, []).
+      ?registry(StationId), ?MODULE, {StationId, EVSE}, []).
 
 %% @doc
 %% Connect the calling process to the station. Called by the process
@@ -74,15 +73,11 @@ stop(Station) ->
 
 callback_mode() -> state_functions.
 
-init({StationId, NumEVSE, Sup}) ->
+init({StationId, EVSESpecs}) ->
     process_flag(trap_exit, true),
-    {ok, disconnected, #data{stationid = StationId},
-     [{next_event, internal, {init_evse, Sup, NumEVSE}}]}.
+    {ok, disconnected, #data{stationid = StationId,
+                             evse = init_evse(EVSESpecs)}}.
 
-disconnected(internal, {init_evse, Sup, NumEVSE}, Data) ->
-    {ok, EVSESup} = ocpp_station_sup:start_evse_sup(Sup),
-    EVSE = init_evse(EVSESup, NumEVSE),
-    {keep_state, Data#data{evse_sup = EVSESup, evse = EVSE}};
 disconnected({call, From}, {connect, ConnectionPid}, Data) ->
     {next_state, connected,
      setup_connection(Data, ConnectionPid),
@@ -107,7 +102,7 @@ booting(cast, {reply, Response},
             rpc_reply(From, Response),
             NextState =
                 case ocpp_message:get(<<"status">>, Response) of
-                    <<"Accepted">> -> idle;
+                    <<"Accepted">> -> provisioning;
                     <<"Rejected">> -> connected;
                     <<"Pending">>  -> boot_pending
                 end,
@@ -140,6 +135,26 @@ booting(EventType, Event, Data) ->
 boot_pending(cast, disconnect, Data) ->
     {next_state, disconnected, cleanup_connection(Data)};
 boot_pending(EventType, Event, Data) ->
+    handle_event(EventType, Event, Data).
+
+provisioning({call, From}, {rpccall, Message}, Data) ->
+    %% I don't really like using these case expressions instead of
+    %% pattern matching in the function head. This is making me
+    %% re-think the type used for the messages... Maybe atoms are
+    %% fine... {rpccall, 'StatusNotification', PDU (jerk term hidden in `ocpp_message`)}
+    case ocpp_message:type(Message) of
+        <<"StatusNotificationRequest">> ->
+            NewData = update_status(Message, Data),
+            gen_statem:reply(From, ok),
+            {next_state, provisioning, NewData};
+        <<"HeartbeatRequest">> ->
+            gen_statem:reply(From, {ok, heartbeat_response()}),
+            ocpp_handler:station_ready(Data#data.stationid),
+            {next_state, idle, Data}
+    end;
+provisioning(cast, disconnect, Data) ->
+    {next_state, disconnected, cleanup_connection(Data)};
+provisioning(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
 idle({call, From}, {rpccall, Message}, Data) ->
@@ -203,13 +218,36 @@ handle_rpccall(Message, From, Data) ->
 clear_pending_request(Data) ->
     Data#data{pending = undefined}.
 
-init_evse(_, 0) ->
-    [];
-init_evse(EVSESup, N) ->
-    [ocpp_evse_sup:start_evse(EVSESup, N)|init_evse(EVSESup, N - 1)].
-
 rpc_reply(ReplyTo, Message) ->
     gen_statem:reply(ReplyTo, {ok, Message}).
 
 rpc_error(ReplyTo, Error) ->
     gen_statem:reply(ReplyTo, {error, Error}).
+
+update_status(Message, Data) ->
+    _Time = ocpp_message:get(<<"timestamp">>, Message),
+    Status = ocpp_message:get(<<"connectorStatus">>, Message),
+    EVSEId = ocpp_message:get(<<"evseId">>, Message),
+    ConnectorId = ocpp_message:get(<<"connectorId">>, Message),
+    Data#data{evse = update_connector_status(
+                       Data#data.evse, EVSEId, ConnectorId, Status)}.
+
+update_connector_status(EVSE, EVSEId, ConnectorId, Status) ->
+    maps:update_with(
+      EVSEId,
+      fun (EVSEInfo) ->
+              ocpp_evse:set_status(EVSEInfo, ConnectorId, Status)
+      end,
+      EVSE).
+
+heartbeat_response() ->
+    ocpp_message:new(
+      <<"HeartbeatResponse">>,
+      #{"currentTime" =>
+            list_to_binary(
+              calendar:system_time_to_rfc3339(
+                erlang:system_time(),
+                [{offset, "Z"}, {unit, native}]))}).
+
+init_evse(EVSE) ->
+    maps:from_list(lists:zip(lists:seq(1, length(EVSE)), EVSE)).

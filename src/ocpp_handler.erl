@@ -9,8 +9,15 @@
 
 -behaviour(gen_event).
 
--export([start_link/1, add_handler/3, add_handler/4, rpc_request/2]).
--export([station_connected/1, station_disconnected/1]).
+%% management API
+-export([start_link/1, add_handler/3, add_handler/4]).
+%% informational events
+-export([station_connected/1,
+         station_disconnected/1,
+         station_ready/1]).
+%% OCPP events
+-export([rpc_request/2]).
+%% gen_event callbacks
 -export([init/1, handle_event/2, handle_call/2]).
 
 -record(state, {handler_state :: any(),
@@ -92,6 +99,11 @@ station_connected(StationId) ->
 -spec station_disconnected(StationId :: binary()) -> ok.
 station_disconnected(StationId) ->
     gen_event:notify(?registry(StationId), station_disconnected).
+
+%% @doc The station has fully booted and is idle.
+-spec station_ready(StationId :: binary()) -> ok.
+station_ready(StationId) ->
+    gen_event:notify(?registry(StationId), station_ready).
 
 %%% ========= gen_event callbacks =========
 

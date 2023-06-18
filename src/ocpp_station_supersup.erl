@@ -25,7 +25,7 @@ init([]) ->
                        restart => transient}]}}.
 
 -spec start_station(StationId :: binary(),
-                    NumEVSE :: pos_integer(),
+                    EVSE :: [ocpp_evse:evse()],
                     CSMSHandler :: {Module :: module(), InitArg :: any()}) ->
           {ok, pid()} |
           {error, {already_started, pid()}}.

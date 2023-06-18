@@ -1,35 +1,64 @@
-%%% @doc State machine representating the state of an EVSE
+%%% @doc Data structure representing an EVSE.
 %%% @end
 %%%
 %%% Copyright (c) 2023 Will Vining <wfv@vining.dev>
 
 -module(ocpp_evse).
 
--behaviour(gen_statem).
+-export([new/1, new_connector/0, new_connector/1, set_status/3, status/2]).
 
--export([start_link/1]).
--export([callback_mode/0, init/1]).
-%% States
--export([unavailable/3, available/3, reserved/3, occupied/3]).
+-export_type([evse/0, connector/0, status/0]).
 
--record(data, {evseid :: pos_integer()}).
+-record(connector, {status = 'Unavailable' :: status()}).
+-record(evse, {connectors = [] :: [connector()]}).
 
-start_link(EVSEId) ->
-    gen_statem:start_link(?MODULE, EVSEId, []).
+-opaque connector() :: #connector{}.
+-opaque evse() :: #evse{}.
 
-init(EVSEId) ->
-    {ok, unavailable, #data{evseid = EVSEId}}.
+-type status() :: 'Avaliable'
+                | 'Occupied'
+                | 'Reserved'
+                | 'Unavailable'
+                | 'Faulted'.
 
-callback_mode() -> state_functions.
+%% @doc Create a new EVSE. `Connectors' can be a list of `connector/0'
+%% structures or a non-zero integer. If it is an integer the evse will
+%% be initialized with that number of connectors, all in the
+%% 'Unavailable' state.
+-spec new(Connectors :: pos_integer() | [connector()]) -> evse().
+new(Connectors) when is_integer(Connectors) ->
+    #evse{connectors = lists:duplicate(Connectors, #connector{})};
+new(Connectors) ->
+    #evse{connectors = Connectors}.
 
-unavailable(_, _, _) ->
-    error('not implemented').
+%% @doc Return an ``'Unavailable' '' connector.
+-spec new_connector() -> connector().
+new_connector() ->
+    #connector{}.
 
-available(_, _, _) ->
-    error('not implemented').
+%% @doc Return a connector with status set to `Status'
+-spec new_connector(Status :: status()) -> connector().
+new_connector(Status) ->
+    #connector{status = Status}.
 
-reserved(_, _, _) ->
-    error('not implemented').
+-spec status(EVSE :: evse(), ConnectorId :: pos_integer()) -> status().
+status(#evse{connectors = Connectors}, ConnectorId) ->
+    Conn = lists:nth(ConnectorId, Connectors),
+    Conn#connector.status.
 
-occupied(_, _, _) ->
-    error('not implemented').
+-spec set_status(EVSE :: evse(),
+                 ConnectorId :: pos_integer(),
+                 Status :: status()) -> evse().
+set_status(#evse{connectors = Connectors} = EVSE, ConnectorId, Status)
+  when ConnectorId > length(Connectors);
+       ConnectorId < 1 ->
+    error(invalid_connectorid, [EVSE, ConnectorId, Status]);
+set_status(#evse{connectors = Connectors} = EVSE, ConnectorId, Status) ->
+    EVSE#evse{
+      connectors =
+          do_set_status(Connectors, ConnectorId - 1, Status)}.
+
+do_set_status([Connector|Rest], 0, Status) ->
+    [Connector#connector{status = Status} | Rest];
+do_set_status([Conn|Rest], Index, Status) ->
+    [Conn | do_set_status(Rest, Index - 1, Status)].

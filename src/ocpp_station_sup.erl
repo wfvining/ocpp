@@ -7,13 +7,17 @@
 
 -behaviour(supervisor).
 
--export([start_link/3, start_evse_sup/1, stop/1]).
+-export([start_link/3, stop/1]).
 -export([init/1]).
 
-start_link(StationId, NumEVSE, CSMSHandler) ->
-    supervisor:start_link(?MODULE, {StationId, NumEVSE, CSMSHandler}).
+-spec start_link(StationId :: binary(),
+                 EVSE :: [ocpp_evse:evse()],
+                 CSMSHandler :: {module(), any()}) ->
+          supervisor:startlink_ret().
+start_link(StationId, EVSE, CSMSHandler) ->
+    supervisor:start_link(?MODULE, {StationId, EVSE, CSMSHandler}).
 
-init({StationId, NumEVSE, CSMSHandler}) ->
+init({StationId, EVSE, CSMSHandler}) ->
     SupFlags = #{strategy => rest_for_one,
                  intensity => 4,
                  period => 3600},
@@ -34,22 +38,12 @@ init({StationId, NumEVSE, CSMSHandler}) ->
            modules => [ocpp_station_manager]},
          #{id => station,
            start => {ocpp_station, start_link,
-                     [StationId, NumEVSE, self()]},
+                     [StationId, EVSE]},
            restart => permanent,
            type => worker,
            shutdown => 10000,
            modules => [ocpp_station]}],
     {ok, {SupFlags, ChildSpecs}}.
-
--spec start_evse_sup(StationSupervisor :: pid()) -> {ok, pid()}.
-start_evse_sup(StationSupervisor) ->
-    supervisor:start_child(
-      StationSupervisor,
-      #{id => evse_sup,
-        start => {ocpp_evse_sup, start_link, []},
-        restart => temporary,
-        type => supervisor,
-        modules => [ocpp_evse_sup]}).
 
 -spec stop(StationSupervisor :: pid()) -> true.
 stop(StationSupervisor) ->

@@ -9,6 +9,19 @@
         list_to_binary(
           atom_to_list(?MODULE) ++ "_" ++ atom_to_list(Case) ++ "_station")).
 
+-define(BOOT_ACCEPT,
+        ocpp_message:new(
+          <<"BootNotificationRequest">>,
+          #{"chargingStation" =>
+                #{"model" => <<"ct_model">>,
+                  "vendorName" =>  <<"foo">>},
+            "reason" => <<"PowerUp">>,
+            "customData" =>
+                #{"testAction" => <<"ACCEPT">>,
+                  "interval" => 1,
+                  "currentTime" => <<"2023-06-15T15:30.00Z">>,
+                  "vendorId" => <<"boot_accept">>}})).
+
 all() ->
     [connect_station,
      not_supported_error,
@@ -32,22 +45,36 @@ groups() ->
 init_per_suite(Config) ->
     application:ensure_all_started(jerk),
     %% Load the schemas.
-    PrivDir = code:priv_dir(ocpp),
-    ok = jerk:load_schema(
-           filename:join(
-             [PrivDir, "json_schemas", "BootNotificationRequest.json"])),
-    ok = jerk:load_schema(
-           filename:join(
-             [PrivDir, "json_schemas", "BootNotificationResponse.json"])),
-    ok = jerk:load_schema(
-           filename:join(
-             [PrivDir, "json_schemas", "Get15118EVCertificateRequest.json"])),
+    load_schemas(),
     Config.
+
+load_schemas() ->
+    PrivDir = code:priv_dir(ocpp),
+    SchemaDir = filename:join(PrivDir, "json_schemas"),
+    {ok, Files} = file:list_dir(SchemaDir),
+    [jerk:load_schema(filename:join(SchemaDir, SchemaFile))
+     || SchemaFile <- Files].
 
 end_per_suite(Config) ->
     application:stop(jerk),
     Config.
 
+init_per_testcase(not_supported_error = Case, Config) ->
+    {ok, Apps} = application:ensure_all_started(gproc),
+    StationId = ?stationid(Case),
+    {ok, Sup} = ocpp_station_supersup:start_link(),
+    {ok, _} = ocpp_station_supersup:start_station(
+                StationId,
+                [ocpp_evse:new(2), ocpp_evse:new(2)],
+                {testing_handler, nil}),
+    ok = ocpp_station:connect(StationId),
+    {ok, _} = ocpp_station:rpc(StationId, ?BOOT_ACCEPT),
+
+    {ok, _} = ocpp_station:rpc(
+                StationId, ocpp_message:new(<<"HeartbeatRequest">>, #{})),
+    [{stationid, StationId},
+     {apps, Apps},
+     {supersup, Sup} | Config];
 init_per_testcase(init_error = Case, Config) ->
     {ok, Apps} = application:ensure_all_started(gproc),
     StationId = ?stationid(Case),
@@ -61,7 +88,11 @@ init_per_testcase(Case, Config) ->
     {ok, Sup} = ocpp_station_supersup:start_link(),
     {ok, StationSup} =
         ocpp_station_supersup:start_station(
-          StationId, 2, {testing_handler, nil}),
+          StationId,
+          [ocpp_evse:new(1),
+           ocpp_evse:new(1),
+           ocpp_evse:new(2)],
+          {testing_handler, nil}),
     [{stationid, StationId},
      {ok, Apps},
      {stationsup, StationSup},
@@ -101,7 +132,7 @@ start_after_stop(Config) ->
     timer:sleep(100),
     {ok, _NewStationSup} =
         ocpp_station_supersup:start_station(
-          StationId, 2, {testing_handler, nil}),
+          StationId, [ocpp_evse:new(1)], {testing_handler, nil}),
     ok = ocpp_station:connect(StationId).
 
 init_error() ->
@@ -114,7 +145,7 @@ init_error(Config) ->
           StationId, 1, {testing_handler, {error, 'init error test'}}),
     ?assertExit({noproc, _}, ocpp_station:connect(StationId)),
     {ok,_} = ocpp_station_supersup:start_station(
-               StationId, 1, {testing_handler, nil}),
+               StationId, [ocpp_evse:new(2)], {testing_handler, nil}),
     ok = ocpp_station:connect(StationId).
 
 boot_accepted() ->
@@ -402,30 +433,5 @@ not_supported_error(Config) ->
     Req = #{"iso15118SchemaVersion" => <<"1">>,
             "action" => <<"Install">>,
             "exiRequest" => <<"abcdefg">>},
-    ok = ocpp_station:connect(Station),
-    boot_station(Station, <<"ACCEPT">>),
     {error, Response} = ocpp_station:rpc(Station, ocpp_message:new(Msg, Req)),
     ?assertEqual(<<"NotSupported">>, ocpp_error:code(Response)).
-
-boot_station(Station, Action) ->
-    {ok, Response} =
-        ocpp_station:rpc(
-          Station,
-          ocpp_message:new(
-            <<"BootNotificationRequest">>,
-            #{"chargingStation" =>
-                  #{"model" => <<"ct_model">>,
-                    "vendorName" =>  <<"foo">>},
-              "reason" => <<"PowerUp">>,
-              "customData" =>
-                  #{"testAction" => Action,
-                    "interval" => 1,
-                    "currentTime" =>
-                        list_to_binary(
-                          calendar:system_time_to_rfc3339(
-                            12341234,
-                            [{offset, "Z"}])),
-                    "vendorId" => <<"disconnect_after_x">>}})),
-    ?assertEqual(
-       action_to_status(Action),
-       ocpp_message:get(<<"status">>, Response)).
