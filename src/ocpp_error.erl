@@ -78,8 +78,7 @@ details(#error{details = Details}) ->
 default_description('FormatViolation') ->
     <<"Payload for Action is syntactically incorrect">>;
 default_description('GenericError') ->
-    <<"Any other error not covered by the more specific "
-      "error codes in this table">>;
+    <<"An error occured">>;
 default_description('InternalError') ->
     <<"An internal error occurred and the receiver was not able "
       "to process the requested Action successfully">>;

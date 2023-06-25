@@ -144,9 +144,20 @@ provisioning({call, From}, {rpccall, Message}, Data) ->
     %% fine... {rpccall, 'StatusNotification', PDU (jerk term hidden in `ocpp_message`)}
     case ocpp_message:type(Message) of
         <<"StatusNotificationRequest">> ->
-            NewData = update_status(Message, Data),
-            gen_statem:reply(From, ok),
-            {next_state, provisioning, NewData};
+            UpdatedData =
+                case update_status(Message, Data) of
+                    {ok, NewData} ->
+                        gen_statem:reply(
+                          From, {ok, ocpp_message:new(
+                                       <<"StatusNotificationResponse">>,
+                                       #{}, ocpp_message:id(Message))}),
+                        NewData;
+                    {error, _} ->
+                        gen_statem:reply(
+                          From, {error, ocpp_error:new(ocpp_message:id(Message), 'GenericError')}),
+                        Data
+                end,
+            {next_state, provisioning, UpdatedData};
         <<"HeartbeatRequest">> ->
             gen_statem:reply(From, {ok, heartbeat_response()}),
             ocpp_handler:station_ready(Data#data.stationid),
@@ -229,16 +240,29 @@ update_status(Message, Data) ->
     Status = ocpp_message:get(<<"connectorStatus">>, Message),
     EVSEId = ocpp_message:get(<<"evseId">>, Message),
     ConnectorId = ocpp_message:get(<<"connectorId">>, Message),
-    Data#data{evse = update_connector_status(
-                       Data#data.evse, EVSEId, ConnectorId, Status)}.
+    case update_connector_status(Data#data.evse, EVSEId, ConnectorId, Status)
+    of
+        {ok, NewEVSE} ->
+            {ok, Data#data{evse = NewEVSE}};
+        {error, _Reason} ->
+            {error, Data}
+    end.
 
 update_connector_status(EVSE, EVSEId, ConnectorId, Status) ->
-    maps:update_with(
-      EVSEId,
-      fun (EVSEInfo) ->
-              ocpp_evse:set_status(EVSEInfo, ConnectorId, Status)
-      end,
-      EVSE).
+    try
+        NewEVSE =
+            maps:update_with(
+              EVSEId,
+              fun (EVSEInfo) ->
+                      ocpp_evse:set_status(EVSEInfo, ConnectorId, Status)
+              end,
+              EVSE),
+        {ok, NewEVSE}
+    catch error:badconnector ->
+            {error, badconnector};
+          error:{badkey, _} ->
+            {error, badevse}
+    end.
 
 heartbeat_response() ->
     ocpp_message:new(

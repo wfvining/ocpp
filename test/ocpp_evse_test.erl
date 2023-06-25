@@ -7,7 +7,7 @@
 invalid_connector_test_() ->
     EVSE = ocpp_evse:new(2),
     {inparallel,
-     [?_assertError(invalid_connectorid,
+     [?_assertError(badconnector,
                     ocpp_evse:set_status(EVSE, Id, 'Available'))
       || Id <- [-1, 0, 3]]}.
 

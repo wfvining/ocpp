@@ -9,6 +9,11 @@
         list_to_binary(
           atom_to_list(?MODULE) ++ "_" ++ atom_to_list(Case) ++ "_station")).
 
+-define(nowutc,
+        list_to_binary(calendar:system_time_to_rfc3339(
+                         erlang:system_time(second),
+                         [{offset, "Z"}, {unit, second}]))).
+
 -define(BOOT_ACCEPT,
         ocpp_message:new(
           <<"BootNotificationRequest">>,
@@ -27,7 +32,8 @@ all() ->
      not_supported_error,
      {group, start},
      {group, disconnect},
-     {group, handler}].
+     {group, handler},
+     {group, provisioning}].
 
 groups() ->
     [{handler, [init_error, {group, boot_request}]},
@@ -40,7 +46,10 @@ groups() ->
                    disconnect_during_request]},
      {disconnect_after, [disconnect_after_accept,
                          disconnect_after_pending,
-                         disconnect_after_reject]}].
+                         disconnect_after_reject]},
+     {provisioning, [set_connector_status,
+                     {group, provisioning_errors}]},
+     {provisioning_errors, [provision_invalid_evse, provision_invalid_connector]}].
 
 init_per_suite(Config) ->
     application:ensure_all_started(jerk),
@@ -59,6 +68,27 @@ end_per_suite(Config) ->
     application:stop(jerk),
     Config.
 
+init_per_testcase(Case, Config)
+  when Case =:= set_connector_status;
+       Case =:= set_connector_status_repeat;
+       Case =:= provision_invalid_evse;
+       Case =:= provision_invalid_connector ->
+    {ok, Apps} = application:ensure_all_started(gproc),
+    StationId = ?stationid(provisioning),
+    {ok, Sup} = ocpp_station_supersup:start_link(),
+    {ok, _} = ocpp_station_supersup:start_station(
+                StationId,
+                [ocpp_evse:new(2), ocpp_evse:new(2)],
+                {testing_handler, nil}),
+    ok = ocpp_station:connect(StationId),
+    {ok, _} = ocpp_station:rpc(StationId, ?BOOT_ACCEPT),
+    %% Station has been accepted, but still needs to send status notifications
+    %% for its connectors.
+    [{stationid, StationId},
+     {connectors, [{1, 2}, {2, 2}]},
+     {evse, 2},
+     {apps, Apps},
+     {supersup, Sup} | Config];
 init_per_testcase(not_supported_error = Case, Config) ->
     {ok, Apps} = application:ensure_all_started(gproc),
     StationId = ?stationid(Case),
@@ -435,3 +465,83 @@ not_supported_error(Config) ->
             "exiRequest" => <<"abcdefg">>},
     {error, Response} = ocpp_station:rpc(Station, ocpp_message:new(Msg, Req)),
     ?assertEqual(<<"NotSupported">>, ocpp_error:code(Response)).
+
+set_connector_status() ->
+    [{doc, "It should be possible to set the status of each connector "
+           "multiple times after the station has been accepted"},
+     {timetrap, 5000}].
+set_connector_status(Config) ->
+    StationId = ?config(stationid, Config),
+    Connectors = ?config(connectors, Config),
+    Conn = lists:flatten(
+             [lists:zip(lists:duplicate(NumConn, EVSEId),
+                        lists:seq(1, NumConn))
+              || {EVSEId, NumConn} <- Connectors]),
+    Responses =
+        [begin
+             Msg = ocpp_message:new(
+                     <<"StatusNotificationRequest">>,
+                     #{"timestamp" => ?nowutc,
+                       "connectorStatus" => <<"Unavailable">>,
+                       "evseId" => EVSE,
+                       "connectorId" => ConnId}),
+             {ocpp_station:rpc(StationId, Msg), ocpp_message:id(Msg)}
+         end
+         || {EVSE, ConnId} <- Conn],
+    lists:foreach(
+      fun ({{ok, Message}, Id}) ->
+              ?assertEqual(<<"StatusNotificationResponse">>, ocpp_message:type(Message)),
+              ?assertEqual(Id, ocpp_message:id(Message));
+          ({{error, Reason}, _}) ->
+              ct:fail("Got unexpected error response to status notification: ~p",
+                      Reason)
+      end,
+      Responses),
+    NewResponses =
+        [begin
+             Msg = ocpp_message:new(<<"StatusNotificationRequest">>,
+                                    #{"timestamp" => ?nowutc,
+                                      "connectorStatus" => <<"Available">>,
+                                      "evseId" => EVSE,
+                                      "connectorId" => ConnId}),
+             {ocpp_station:rpc(StationId, Msg), ocpp_message:id(Msg)}
+         end
+         || {EVSE, ConnId} <- Conn],
+    lists:foreach(
+      fun ({{ok, Message}, Id}) ->
+              ?assertEqual(<<"StatusNotificationResponse">>, ocpp_message:type(Message)),
+              ?assertEqual(Id, ocpp_message:id(Message));
+          ({{error, Reason}, _}) ->
+              ct:fail("Got unexpected error response to *second* status notification: ~p",
+                      Reason)
+      end,
+      NewResponses).
+
+provision_invalid_evse() ->
+    [{timetrap, 5000}].
+provision_invalid_evse(Config) ->
+    StationId = ?config(stationid, Config),
+    Connectors = ?config(connectors, Config),
+    {EVSE, _} = lists:unzip(Connectors),
+    BadEVSEId = lists:max(EVSE) + 1,
+    provision_invalid(StationId, BadEVSEId, 1),
+    provision_invalid(StationId, 0, 1).
+
+provision_invalid_connector() ->
+    [{timetrap, 5000}].
+provision_invalid_connector(Config) ->
+    StationId = ?config(stationid, Config),
+    [{EVSEId, NumConn}|_] = ?config(connectors, Config),
+    BadConn = NumConn + 1,
+    provision_invalid(StationId, EVSEId, BadConn),
+    provision_invalid(StationId, EVSEId, 0).
+
+provision_invalid(StationId, EVSEId, ConnId) ->
+    Msg = ocpp_message:new(<<"StatusNotificationRequest">>,
+                           #{"timestamp" => ?nowutc,
+                             "connectorStatus" => <<"Available">>,
+                             "evseId" => EVSEId,
+                             "connectorId" => ConnId}),
+    {error, Reason} = ocpp_station:rpc(StationId, Msg),
+    ?assertEqual(ocpp_message:id(Msg), ocpp_error:id(Reason)),
+    ?assertEqual(<<"GenericError">>, ocpp_error:code(Reason)).

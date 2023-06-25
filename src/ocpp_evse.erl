@@ -52,7 +52,7 @@ status(#evse{connectors = Connectors}, ConnectorId) ->
 set_status(#evse{connectors = Connectors} = EVSE, ConnectorId, Status)
   when ConnectorId > length(Connectors);
        ConnectorId < 1 ->
-    error(invalid_connectorid, [EVSE, ConnectorId, Status]);
+    error(badconnector, [EVSE, ConnectorId, Status]);
 set_status(#evse{connectors = Connectors} = EVSE, ConnectorId, Status) ->
     EVSE#evse{
       connectors =
