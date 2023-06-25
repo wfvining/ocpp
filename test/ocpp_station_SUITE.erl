@@ -14,7 +14,7 @@
                          erlang:system_time(second),
                          [{offset, "Z"}, {unit, second}]))).
 
--define(BOOT_ACCEPT,
+-define(BOOT(Action),
         ocpp_message:new(
           <<"BootNotificationRequest">>,
           #{"chargingStation" =>
@@ -22,10 +22,13 @@
                   "vendorName" =>  <<"foo">>},
             "reason" => <<"PowerUp">>,
             "customData" =>
-                #{"testAction" => <<"ACCEPT">>,
+                #{"testAction" => Action,
                   "interval" => 1,
                   "currentTime" => <<"2023-06-15T15:30.00Z">>,
-                  "vendorId" => <<"boot_accept">>}})).
+                  "vendorId" => <<"doboot">>}})).
+-define(BOOT_ACCEPT, ?BOOT(<<"ACCEPT">>)).
+-define(BOOT_REJECT, ?BOOT(<<"REJECT">>)).
+-define(BOOT_PENDING, ?BOOT(<<"PENDING">>)).
 
 all() ->
     [connect_station,
@@ -49,7 +52,9 @@ groups() ->
                          disconnect_after_reject]},
      {provisioning, [set_connector_status,
                      {group, provisioning_errors}]},
-     {provisioning_errors, [provision_invalid_evse, provision_invalid_connector]}].
+     {provisioning_errors, [provision_invalid_evse, provision_invalid_connector,
+                            {group, boot_pending_messages}]},
+     {boot_pending_messages, [forbidden_messages, boot_request_pending]}].
 
 init_per_suite(Config) ->
     application:ensure_all_started(jerk),
@@ -68,6 +73,25 @@ end_per_suite(Config) ->
     application:stop(jerk),
     Config.
 
+init_per_testcase(Case, Config)
+  when Case =:= forbidden_messages;
+       Case =:= boot_request_pending ->
+    {ok, Apps} = application:ensure_all_started(gproc),
+    StationId = ?stationid(provisioning),
+    {ok, Sup} = ocpp_station_supersup:start_link(),
+    {ok, _} = ocpp_station_supersup:start_station(
+                StationId,
+                [ocpp_evse:new(2), ocpp_evse:new(2)],
+                {testing_handler, nil}),
+    ok = ocpp_station:connect(StationId),
+    {ok, _} = ocpp_station:rpc(StationId, ?BOOT_PENDING),
+    %% Station has been accepted, but still needs to send status notifications
+    %% for its connectors.
+    [{stationid, StationId},
+     {connectors, [{1, 2}, {2, 2}]},
+     {evse, 2},
+     {apps, Apps},
+     {supersup, Sup} | Config];
 init_per_testcase(Case, Config)
   when Case =:= set_connector_status;
        Case =:= set_connector_status_repeat;
@@ -545,3 +569,29 @@ provision_invalid(StationId, EVSEId, ConnId) ->
     {error, Reason} = ocpp_station:rpc(StationId, Msg),
     ?assertEqual(ocpp_message:id(Msg), ocpp_error:id(Reason)),
     ?assertEqual(<<"GenericError">>, ocpp_error:code(Reason)).
+
+forbidden_messages() ->
+    [{doc, "Test requirement B02.FR.09 - any message other than a "
+           "BootNotificationRequest while in the Pending status "
+           "is met with a 'SecurityError' response."},
+     {timetrap, 5000}].
+forbidden_messages(Config) ->
+    StationId = ?config(stationid, Config),
+    Msg = ocpp_message:new(<<"StatusNotificationRequest">>,
+                           #{"timestamp" => ?nowutc,
+                             "connectorStatus" => <<"Available">>,
+                             "evseId" => 1,
+                             "connectorId" => 1}),
+    {error, Reason} = ocpp_station:rpc(StationId, Msg),
+    ?assertEqual(ocpp_message:id(Msg), ocpp_error:id(Reason)),
+    ?assertEqual(<<"SecurityError">>, ocpp_error:code(Reason)).
+
+boot_request_pending() ->
+    [{doc, "The station accepts a boot request while in the pending state."},
+     {timetrap, 5000}].
+boot_request_pending(Config) ->
+    StationId = ?config(stationid, Config),
+    Msg = ?BOOT_ACCEPT,
+    {ok, Response} = ocpp_station:rpc(StationId, Msg),
+    ?assertEqual(ocpp_message:id(Msg), ocpp_message:id(Response)),
+    ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response)).

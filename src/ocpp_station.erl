@@ -134,6 +134,21 @@ booting(EventType, Event, Data) ->
 
 boot_pending(cast, disconnect, Data) ->
     {next_state, disconnected, cleanup_connection(Data)};
+boot_pending({call, From}, {rpccall, Message}, Data) ->
+    case ocpp_message:type(Message) of
+        <<"BootNotificationRequest">> ->
+            {next_state, connected, Data, [postpone]};
+        _ ->
+            rpc_error(
+              From,
+              ocpp_error:new(
+                ocpp_message:id(Message), 'SecurityError',
+                [{description,
+                  <<"The charging station is not allowed to initiate "
+                    "sending any messages other than a BootNotificationRequest "
+                    "before being accepted.">>}])),
+            keep_state_and_data
+    end;
 boot_pending(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
