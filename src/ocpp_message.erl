@@ -1,20 +1,83 @@
 -module(ocpp_message).
 
--export([new/2, new/3, properties/1, get/2, get/3, id/1, type/1]).
+-export([new_request/2, new_request/3, new_response/3,
+         properties/1, get/2, get/3, id/1, type/1]).
 
--type payload() :: #{binary() | string() => jerk:primterm() | payload()}
-                 | [{binary() | string(), jerk:primterm() | payload()}].
+-type message_body() :: #{binary() | string() => jerk:primterm() | message_body()}
+                      | [{binary() | string(), jerk:primterm() | message_body()}].
 
 -export_type([message/0, messageid/0]).
 
--opaque message() :: {messageid(), jerk:jerkterm()}.
+-type messagetype() :: 'Authorize'
+                     | 'BootNotification'
+                     | 'CancelReservation'
+                     | 'CertificateSigned'
+                     | 'ChangeAvailability'
+                     | 'ClearCache'
+                     | 'ClearChargingProfile'
+                     | 'ClearDisplayMessage'
+                     | 'ClearedChargingLimit'
+                     | 'ClearVariableMonitoring'
+                     | 'CostUpdated'
+                     | 'CustomerInformation'
+                     | 'DataTransfer'
+                     | 'DeleteCertificate'
+                     | 'FirmwareStatusNotification'
+                     | 'Get15118EVCertificate'
+                     | 'GetBaseReport'
+                     | 'GetCertificateStatus'
+                     | 'GetChargingProfiles'
+                     | 'GetCompositeSchedule'
+                     | 'GetDisplayMessages'
+                     | 'GetInstalledCertificateIds'
+                     | 'GetLocalListVersion'
+                     | 'GetLog'
+                     | 'GetMonitoringReport'
+                     | 'GetReport'
+                     | 'GetTransactionStatus'
+                     | 'GetVariables'
+                     | 'Heartbeat'
+                     | 'InstallCertificate'
+                     | 'LogStatusNotification'
+                     | 'MeterValues'
+                     | 'NotifyChargingLimit'
+                     | 'NotifyCustomerInformation'
+                     | 'NotifyDisplayMessages'
+                     | 'NotifyEVChargingNeeds'
+                     | 'NotifyEVChargingSchedule'
+                     | 'NotifyEvent'
+                     | 'NotifyMonitoringReport'
+                     | 'NotifyReport'
+                     | 'PublishFirmware'
+                     | 'PublishFirmwareStatusNotification'
+                     | 'ReportChargingProfiles'
+                     | 'RequestStartTransaction'
+                     | 'RequestStopTransaction'
+                     | 'ReservationStatusUpdate'
+                     | 'ReserveNow'
+                     | 'Reset'
+                     | 'SecurityEventNotification'
+                     | 'SendLocalList'
+                     | 'SetChargingProfile'
+                     | 'SetDisplayMessage'
+                     | 'SetMonitoringBase'
+                     | 'SetMonitoringLevel'
+                     | 'SetNetworkProfile'
+                     | 'SetVariableMonitoring'
+                     | 'SetVariables'
+                     | 'SignCertificate'
+                     | 'StatusNotification'
+                     | 'TransactionEvent'
+                     | 'TriggerMessage'
+                     | 'UnlockConnector'
+                     | 'UnpublishFirmware'
+                     | 'UpdateFirmware'.
+
+-type payload() :: jerk:jerkterm().
+-type message() :: {messagetype(), messageid(), payload()}.
 -type messageid() :: binary().
 
 -define(BASE_PATH, "urn:OCPP:Cp:2:2020:3").
-
--spec properties(message()) -> [binary()].
-properties({_, Message}) ->
-    jerk:attributes(Message).
 
 %% Objective - when we return a value that is itself a jerk object, we
 %% return a message fragment with an id equal to <<MessageId/binary,
@@ -22,14 +85,44 @@ properties({_, Message}) ->
 
 -record(msgid, {id :: binary(), path = [] :: [binary()]}).
 
+-spec properties(message()) -> [binary()].
+properties({_, _, Message}) ->
+    jerk:attributes(Message).
+
+%% @see new_request/3
+-spec new_request(messagetype(), message_body()) -> message().
+new_request(MessageType, MessageBody) ->
+    new_request(MessageType, MessageBody, new_messageid()).
+
+%% @doc Create a new request. If the properties in `MessageBody' are
+%% invalid or do not satisfy the message schema the call will raise an
+%% error with reason `badarg'.
+-spec new_request(messagetype(), message_body(), messageid()) -> message().
+new_request(MessageType, MessageBody, MessageId) ->
+    MsgType = atom_to_binary(MessageType),
+    SchemaURI = message_uri(<<MsgType/binary, "Request">>),
+    {MessageType, MessageId, jerk:new(SchemaURI, prepare_payload(MessageBody))}.
+
+%% @doc Construct a new response term.
+-spec new_response(messagetype(), message_body(), messageid()) -> message().
+new_response(MessageType, MessageBody, MessageId) ->
+    MsgType = atom_to_binary(MessageType),
+    SchemaURI = message_uri(<<MsgType/binary, "Response">>),
+    {MessageType, MessageId, jerk:new(SchemaURI, prepare_payload(MessageBody))}.
+
 -spec type(Message :: message()) -> binary().
-type({_MessageId, Message}) ->
+type({_, _MessageId, Message}) ->
     Schema = jerk:id(Message),
     hd(lists:reverse(binary:split(Schema, <<":">>, [global]))).
 
 -spec get(Key :: binary(), Message :: message()) -> jerk:primterm() | jerk:jerkterm().
-get(Key, {MessageId, Message}) ->
-    get(string:split(Key, "/", all), decompose_msgid(MessageId), Message).
+get(Key, {_, MessageId, Message}) ->
+    case get(string:split(Key, "/", all), decompose_msgid(MessageId), Message) of
+        {SubId, Value} ->
+            {undefined, SubId, Value};
+        Value ->
+            Value
+    end.
 
 decompose_msgid(MessageId) ->
     case binary:split(MessageId, <<"#/">>) of
@@ -63,23 +156,9 @@ get([Key|Rest], #msgid{path = Path} = MsgId, IntermediatValue) ->
         MsgId#msgid{path = Path ++ [Key]},
         jerk:get_value(IntermediatValue, Key)).
 
-%% @doc @see new/3
--spec new(MessageType :: binary(), Payload :: payload()) -> message().
-new(MessageType, Payload) ->
-    new(MessageType, Payload, new_messageid()).
-
-%% @doc Create a new message. If the properties in `Payload' are
-%% invalid the call will fail with reason `badarg'
--spec new(MessageType :: binary(), Payload :: payload(), MessageId :: messageid()) ->
-          message().
-new(MessageType, Payload, MessageId) when is_list(MessageId) ->
-    new(MessageType, Payload, list_to_binary(MessageId));
-new(MessageType, Payload, MessageId) when is_binary(MessageId) ->
-    {MessageId, jerk:new(message_uri(MessageType), prepare_payload(Payload))}.
-
 %% @doc Return the message ID.
 -spec id(Message :: message()) -> messageid().
-id({Id, _}) -> Id.
+id({_, Id, _}) -> Id.
 
 message_uri(MessageType) when is_list(MessageType) ->
     message_uri(list_to_binary(MessageType));

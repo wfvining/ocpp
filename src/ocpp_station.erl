@@ -163,8 +163,8 @@ provisioning({call, From}, {rpccall, Message}, Data) ->
                 case update_status(Message, Data) of
                     {ok, NewData} ->
                         gen_statem:reply(
-                          From, {ok, ocpp_message:new(
-                                       <<"StatusNotificationResponse">>,
+                          From, {ok, ocpp_message:new_response(
+                                       'StatusNotification',
                                        #{}, ocpp_message:id(Message))}),
                         NewData;
                     {error, _} ->
@@ -174,7 +174,7 @@ provisioning({call, From}, {rpccall, Message}, Data) ->
                 end,
             {next_state, provisioning, UpdatedData};
         <<"HeartbeatRequest">> ->
-            gen_statem:reply(From, {ok, heartbeat_response()}),
+            gen_statem:reply(From, {ok, heartbeat_response(ocpp_message:id(Message))}),
             ocpp_handler:station_ready(Data#data.stationid),
             {next_state, idle, Data}
     end;
@@ -279,14 +279,15 @@ update_connector_status(EVSE, EVSEId, ConnectorId, Status) ->
             {error, badevse}
     end.
 
-heartbeat_response() ->
-    ocpp_message:new(
-      <<"HeartbeatResponse">>,
+heartbeat_response(MessageId) ->
+    ocpp_message:new_response(
+      'Heartbeat',
       #{"currentTime" =>
             list_to_binary(
               calendar:system_time_to_rfc3339(
                 erlang:system_time(second),
-                [{offset, "Z"}, {unit, second}]))}).
+                [{offset, "Z"}, {unit, second}]))},
+     MessageId).
 
 init_evse(EVSE) ->
     maps:from_list(lists:zip(lists:seq(1, length(EVSE)), EVSE)).

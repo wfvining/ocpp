@@ -35,12 +35,12 @@ get_nested_test_() ->
      "ocpp_message API to access its fields.",
      {setup, fun load_schemas/0, fun teardown_apps/1,
       [fun() ->
-               MessageType = <<"CancelReservationRequest">>,
+               MessageType = 'CancelReservation',
                Payload = #{<<"reservationId">> => 123,
                            <<"customData">> =>
                                #{<<"foo">> => [1, 2, 3],
                                  <<"vendorId">> => <<"this is the vendor id">>}},
-               Message = ocpp_message:new(MessageType, Payload),
+               Message = ocpp_message:new_request(MessageType, Payload),
                CustomData = ocpp_message:get(<<"customData">>, Message),
                ?assertEqual([1, 2, 3], ocpp_message:get(<<"foo">>, CustomData))
        end]}}.
@@ -49,25 +49,25 @@ get_message_id_test_() ->
     {"ocpp_message:id/1 returns the message id",
      {setup, fun load_schemas/0, fun teardown_apps/1,
       [fun() ->
-               MessageType = <<"CancelReservationRequest">>,
+               MessageType = 'CancelReservation',
                Payload = #{<<"reservationId">> => 123,
                            <<"customData">> =>
                                #{<<"foo">> => [1, 2, 3],
                                  <<"vendorId">> => <<"this is the vendor id">>}},
                MessageId = <<"abcdefg">>,
-               Message = ocpp_message:new(MessageType, Payload, MessageId),
+               Message = ocpp_message:new_request(MessageType, Payload, MessageId),
                CustomData = ocpp_message:get(<<"customData">>, Message),
                ?assertEqual(<<"abcdefg">>, ocpp_message:id(Message)),
                ?assertEqual(<<"abcdefg#/customData">>, ocpp_message:id(CustomData))
        end]}}.
 
 construct_from_map() ->
-    MessageType = <<"CancelReservationRequest">>,
+    MessageType = 'CancelReservation',
     Payload = #{<<"reservationId">> => 123,
                 <<"customData">> =>
                     #{<<"foo">> => [1, 2, 3],
                       <<"vendorId">> => <<"this is the vendor id">>}},
-    Message = ocpp_message:new(MessageType, Payload),
+    Message = ocpp_message:new_request(MessageType, Payload),
     ?assertEqual([<<"customData">>, <<"reservationId">>],
                  ocpp_message:properties(Message)),
     ?assertEqual(123, ocpp_message:get(<<"reservationId">>, Message)),
@@ -80,7 +80,23 @@ construct_with_error() ->
      {inparallel,
       [?_assertError(
           badarg,
-          ocpp_message:new(<<"CancelReservationRequest">>, Message))
+          ocpp_message:new_request('CancelReservation', Message))
        || Message <- [#{<<"bad-key">> => 2323, <<"reservationId">> => 123},
                       #{<<"reservationId">> => <<"not-an-integer">>},
                       #{}]]}}.
+
+type_test_() ->
+    {"ocpp_message:type/1 returns the name of the schema.",
+     {setup, fun load_schemas/0, fun teardown_apps/1,
+      fun () ->
+              Message =
+                  ocpp_message:new_request(
+                    'CancelReservation',
+                    #{<<"reservationId">> => 123,
+                      <<"customData">> => #{<<"vendorId">> => <<"foo">>}}),
+              ?assertEqual(<<"CancelReservationRequest">>,
+                           ocpp_message:type(Message))
+              %% This is broken in jerk @ 798d231
+              %% ?assertEqual(<<"CancelReservationRequest#/customData">>,
+              %%              ocpp_message:type(Message))
+     end}}.

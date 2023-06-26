@@ -139,8 +139,8 @@ handle_event(Event, #state{mod = Mod, handler_state = HState} = State) ->
 request_fun(<<"BootNotificationRequest">>) -> boot_notification;
 request_fun(<<"Get15118EVCertificateRequest">>) -> get_15118_ev_certificate.
 
-response_type(boot_notification) -> <<"BootNotificationResponse">>;
-response_type(get_15118_ev_certificate) -> <<"Get1511EVCertificateResponse">>.
+response_type(boot_notification) -> 'BootNotification';
+response_type(get_15118_ev_certificate) -> 'Get1511EVCertificate'.
 
 handle_call(Call, State) ->
     io:format("got call ~p while state is ~p~n", [Call, State]),
@@ -153,9 +153,10 @@ do_request(RequestFun, Message,
     try Mod:RequestFun(Message, HState) of
         {reply, Response, NewHState} ->
             MessageId = ocpp_message:id(Message),
-            ResponseMsg = ocpp_message:new(response_type(RequestFun),
-                                           keys_to_binary(Response),
-                                           MessageId),
+            ResponseMsg = ocpp_message:new_response(
+                            response_type(RequestFun),
+                            keys_to_binary(Response),
+                            MessageId),
             ocpp_station:reply(StationId, ResponseMsg),
             State#state{ handler_state = NewHState};
         {error, Reason, NewHState} ->
