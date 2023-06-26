@@ -161,14 +161,15 @@ do_request(RequestFun, Message,
             State#state{ handler_state = NewHState};
         {error, Reason, NewHState} ->
             Error = ocpp_error:new(
-                      ocpp_message:id(Message), 'InternalError',
+                      'InternalError',
+                      ocpp_message:id(Message),
                       [{details, #{<<"reason">> => Reason}}]),
             ocpp_station:error(StationId, Error),
             State#state{handler_state = NewHState}
     catch error:undef ->
             ocpp_station:error(
               StationId,
-              ocpp_error:new(ocpp_message:id(Message), 'NotSupported')),
+              ocpp_error:new('NotSupported', ocpp_message:id(Message))),
             State;
           Exception:Reason:Trace when Exception =:= error;
                                       Exception =:= exit ->
@@ -179,7 +180,8 @@ do_request(RequestFun, Message,
                          "Handler State: ~p~n"
                          "Stack trace: ~p~n",
                          [Mod, StationId, Reason, Message, HState, Trace]),
-            Error = ocpp_error:new(ocpp_message:id(Message), 'InternalError',
+            Error = ocpp_error:new('InternalError',
+                                   ocpp_message:id(Message),
                                    [{details, #{<<"reason">> => Reason}}]),
             error({ocpp_handler_error, Error})
     end.

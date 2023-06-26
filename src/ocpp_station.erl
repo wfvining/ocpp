@@ -142,7 +142,8 @@ boot_pending({call, From}, {rpccall, Message}, Data) ->
             rpc_error(
               From,
               ocpp_error:new(
-                ocpp_message:id(Message), 'SecurityError',
+                'SecurityError',
+                ocpp_message:id(Message),
                 [{description,
                   <<"The charging station is not allowed to initiate "
                     "sending any messages other than a BootNotificationRequest "
@@ -169,7 +170,7 @@ provisioning({call, From}, {rpccall, Message}, Data) ->
                         NewData;
                     {error, _} ->
                         gen_statem:reply(
-                          From, {error, ocpp_error:new(ocpp_message:id(Message), 'GenericError')}),
+                          From, {error, ocpp_error:new('GenericError', ocpp_message:id(Message))}),
                         Data
                 end,
             {next_state, provisioning, UpdatedData};

@@ -36,17 +36,17 @@
 
 -opaque error() :: #error{}.
 
-%% @equiv new(MessageId, Code, []).
--spec new(MessageId :: binary(), Code :: code()) -> error().
-new(MessageId, Code) -> new(MessageId, Code, []).
+%% @equiv new(Code, MessageId, []).
+-spec new(Code :: code(), MessageId :: binary()) -> error().
+new(Code, MessageId) -> new(Code, MessageId, []).
 
 %% @doc Create a new error.
--spec new(MessageId :: binary(),
-          Code :: code(),
+-spec new(Code :: code(),
+          MessageId :: binary(),
           Options :: [Option]) -> error()
               when Option :: {description, binary()}
                            | {details, #{binary() => jsonterm()}}.
-new(MessageId, Code, Options) ->
+new(Code, MessageId, Options) ->
     Description = proplists:get_value(description, Options, undefined),
     Details = proplists:get_value(details, Options, #{}),
     #error{id = MessageId,
