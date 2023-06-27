@@ -90,6 +90,9 @@ connected(cast, disconnect, Data) ->
 connected({call, From}, {rpccall, {'BootNotification', _, _} = Message}, Data) ->
     NewData = handle_rpccall(Message, From , Data),
     {next_state, booting, NewData};
+connected({call, From}, {rpccall, {_, MessageId, _}}, _Data) ->
+    Error = ocpp_error:new('SecurityError', MessageId),
+    {keep_state_and_data, [{reply, From, {error, Error}}]};
 connected(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 

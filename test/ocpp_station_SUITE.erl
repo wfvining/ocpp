@@ -33,6 +33,7 @@
 all() ->
     [connect_station,
      not_supported_error,
+     message_before_boot_request,
      {group, start},
      {group, disconnect},
      {group, handler},
@@ -201,6 +202,20 @@ init_error(Config) ->
     {ok,_} = ocpp_station_supersup:start_station(
                StationId, [ocpp_evse:new(2)], {testing_handler, nil}),
     ok = ocpp_station:connect(StationId).
+
+message_before_boot_request() ->
+    [{doc, "If a message other than a boot request is sent before the station "
+           " is accepted the CSMS responds with a SecurityError."},
+     {timetrap, 5000}].
+message_before_boot_request(Config) ->
+    StationId = ?config(stationid, Config),
+    ok = ocpp_station:connect(StationId),
+    Message = ocpp_message:new_request('Heartbeat', #{}),
+    {error, Error} = ocpp_station:rpc(
+                       StationId,
+                       Message),
+    ?assertEqual(<<"SecurityError">>, ocpp_error:code(Error)),
+    ?assertEqual(ocpp_message:id(Message), ocpp_error:id(Error)).
 
 boot_accepted() ->
     [{doc, "A response with status \"Accepted\" is received "
