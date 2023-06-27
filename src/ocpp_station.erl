@@ -87,7 +87,7 @@ connected({call, From}, {connect, _}, _Data) ->
     {keep_state_and_data, [{reply, From, {error, already_connected}}]};
 connected(cast, disconnect, Data) ->
     {next_state, disconnected, cleanup_connection(Data)};
-connected({call, From}, {rpccall, Message}, Data) ->
+connected({call, From}, {rpccall, {'BootNotification', _, _} = Message}, Data) ->
     NewData = handle_rpccall(Message, From , Data),
     {next_state, booting, NewData};
 connected(EventType, Event, Data) ->
@@ -99,14 +99,13 @@ booting(cast, {reply, Response},
         #data{pending = {MessageId, From}} = Data) ->
     case ocpp_message:id(Response) of
         MessageId ->
-            rpc_reply(From, Response),
             NextState =
                 case ocpp_message:get(<<"status">>, Response) of
                     <<"Accepted">> -> provisioning;
                     <<"Rejected">> -> connected;
                     <<"Pending">>  -> boot_pending
                 end,
-            {next_state, NextState, clear_pending_request(Data)};
+            {next_state, NextState, clear_pending_request(Data), [{reply, From, {ok, Response}}]};
         ResponseMsgId ->
             logger:notice(
               "Received out of order response to message ~p "
@@ -119,8 +118,7 @@ booting(cast, {error, Error},
         #data{pending = {MessageId, From}} = Data) ->
     case ocpp_error:id(Error) of
         MessageId ->
-            rpc_error(From, Error),
-            {next_state, connected, clear_pending_request(Data)};
+            {next_state, connected, clear_pending_request(Data), [{reply, From, {error, Error}}]};
         ResponseMsgId ->
             logger:notice(
               "Received out of order error for message ~p "
@@ -134,51 +132,36 @@ booting(EventType, Event, Data) ->
 
 boot_pending(cast, disconnect, Data) ->
     {next_state, disconnected, cleanup_connection(Data)};
+boot_pending({call, _From}, {rpccall, {'BootNotification', _, _}}, Data) ->
+    {next_state, connected, Data, [postpone]};
 boot_pending({call, From}, {rpccall, Message}, Data) ->
-    case ocpp_message:type(Message) of
-        <<"BootNotificationRequest">> ->
-            {next_state, connected, Data, [postpone]};
-        _ ->
-            rpc_error(
-              From,
-              ocpp_error:new(
-                'SecurityError',
-                ocpp_message:id(Message),
-                [{description,
-                  <<"The charging station is not allowed to initiate "
-                    "sending any messages other than a BootNotificationRequest "
-                    "before being accepted.">>}])),
-            keep_state_and_data
-    end;
+    Error =
+        ocpp_error:new(
+          'SecurityError',
+          ocpp_message:id(Message),
+          [{description,
+            <<"The charging station is not allowed to initiate "
+              "sending any messages other than a BootNotificationRequest "
+              "before being accepted.">>}]),
+    %% XXX It is not clear whether this is the correct next state.
+    {keep_state_and_data, [{reply, From, {error, Error}}]};
 boot_pending(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
-provisioning({call, From}, {rpccall, Message}, Data) ->
-    %% I don't really like using these case expressions instead of
-    %% pattern matching in the function head. This is making me
-    %% re-think the type used for the messages... Maybe atoms are
-    %% fine... {rpccall, 'StatusNotification', PDU (jerk term hidden in `ocpp_message`)}
-    case ocpp_message:type(Message) of
-        <<"StatusNotificationRequest">> ->
-            UpdatedData =
-                case update_status(Message, Data) of
-                    {ok, NewData} ->
-                        gen_statem:reply(
-                          From, {ok, ocpp_message:new_response(
-                                       'StatusNotification',
-                                       #{}, ocpp_message:id(Message))}),
-                        NewData;
-                    {error, _} ->
-                        gen_statem:reply(
-                          From, {error, ocpp_error:new('GenericError', ocpp_message:id(Message))}),
-                        Data
-                end,
-            {next_state, provisioning, UpdatedData};
-        <<"HeartbeatRequest">> ->
-            gen_statem:reply(From, {ok, heartbeat_response(ocpp_message:id(Message))}),
-            ocpp_handler:station_ready(Data#data.stationid),
-            {next_state, idle, Data}
-    end;
+provisioning({call, From}, {rpccall, {'Heartbeat', MessageId, _}}, Data) ->
+    {next_state, idle, Data, [{reply, From, {ok, heartbeat_response(MessageId)}}]};
+provisioning({call, From}, {rpccall, {'StatusNotification', MessageId, _} = Message}, Data) ->
+    case update_status(Message, Data) of
+        {ok, NewData} ->
+            Response = {ok, ocpp_message:new_response(
+                              'StatusNotification',
+                              #{}, MessageId)},
+            UpdatedData = NewData;
+        {error, _} ->
+            Response = {error, ocpp_error:new('GenericError', MessageId)},
+            UpdatedData = Data
+    end,
+    {next_state, provisioning, UpdatedData, [{reply, From, Response}]};
 provisioning(cast, disconnect, Data) ->
     {next_state, disconnected, cleanup_connection(Data)};
 provisioning(EventType, Event, Data) ->
@@ -190,8 +173,7 @@ idle({call, From}, {rpccall, Message}, Data) ->
 idle(cast, {error, Error}, #data{pending = {MessageId, From}} = Data) ->
     case ocpp_error:id(Error) of
         MessageId ->
-            rpc_error(From, Error),
-            {next_state, idle, clear_pending_request(Data)};
+            {next_state, idle, clear_pending_request(Data), [{reply, From, {error, Error}}]};
         _ ->
             keep_state_and_data
     end;
