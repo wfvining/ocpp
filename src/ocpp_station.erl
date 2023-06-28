@@ -102,34 +102,31 @@ booting(cast, disconnect, Data) ->
     {next_state, disconnected, cleanup_connection(Data)};
 booting(cast, {reply, Response},
         #data{pending = {MessageId, From}} = Data) ->
-    case ocpp_message:id(Response) of
-        MessageId ->
-            NextState =
-                case ocpp_message:get(<<"status">>, Response) of
-                    <<"Accepted">> -> provisioning;
-                    <<"Rejected">> -> connected;
-                    <<"Pending">>  -> boot_pending
-                end,
+    ResponseId = ocpp_message:id(Response),
+    if
+        MessageId =:= ResponseId ->
+            NextState = boot_status_to_state(Response),
             {next_state, NextState, clear_pending_request(Data), [{reply, From, {ok, Response}}]};
-        ResponseMsgId ->
+        MessageId =/= ResponseId ->
             logger:notice(
               "Received out of order response to message ~p "
               "while awaiting response to message ~p.  "
               "Message dropped.",
-              [ResponseMsgId, MessageId]),
+              [ResponseId, MessageId]),
             keep_state_and_data
     end;
 booting(cast, {error, Error},
         #data{pending = {MessageId, From}} = Data) ->
-    case ocpp_error:id(Error) of
-        MessageId ->
+    ResponseId = ocpp_error:id(Error),
+    if
+        MessageId =:= ResponseId ->
             {next_state, connected, clear_pending_request(Data), [{reply, From, {error, Error}}]};
-        ResponseMsgId ->
+        MessageId =/= ResponseId ->
             logger:notice(
               "Received out of order error for message ~p "
               "while awaiting response to message ~p.  "
               "Message dropped.",
-              [ResponseMsgId, MessageId]),
+              [ResponseId, MessageId]),
             keep_state_and_data
     end;
 booting(EventType, Event, Data) ->
@@ -176,10 +173,11 @@ idle({call, From}, {rpccall, _, _, Message}, Data) ->
     NewData = handle_rpccall(Message, From, Data),
     {next_state, idle, NewData};
 idle(cast, {error, Error}, #data{pending = {MessageId, From}} = Data) ->
-    case ocpp_error:id(Error) of
-        MessageId ->
+    ErrorId = ocpp_error:id(Error),
+    if
+        MessageId =:= ErrorId ->
             {next_state, idle, clear_pending_request(Data), [{reply, From, {error, Error}}]};
-        _ ->
+        MessageId =/= ErrorId ->
             keep_state_and_data
     end;
 idle(cast, disconnect, Data) ->
@@ -273,3 +271,10 @@ heartbeat_response(MessageId) ->
 
 init_evse(EVSE) ->
     maps:from_list(lists:zip(lists:seq(1, length(EVSE)), EVSE)).
+
+boot_status_to_state(Message) ->
+    case ocpp_message:get(<<"status">>, Message) of
+        <<"Accepted">> -> provisioning;
+        <<"Rejected">> -> connected;
+        <<"Pending">>  -> boot_pending
+    end.
