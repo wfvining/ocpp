@@ -32,7 +32,7 @@
          connection = disconnected :: disconnected | {pid(), reference()},
          evse = #{} :: #{pos_integer() => ocpp_evse:evse()},
          pending = undefined :: undefined
-                              | {ocpp_message:message_id(), gen_statem:from()}}).
+                              | {ocpp_message:messageid(), gen_statem:from()}}).
 
 -spec start_link(StationId :: binary(),
                  EVSE :: [ocpp_evse:evse()]) -> gen_statem:start_ret().
@@ -54,7 +54,9 @@ connect(Station) ->
           {ok, Response :: ocpp_message:message()} |
           {error, Reason :: ocpp_rpc:rpcerror()}.
 rpc(Station, Request) ->
-   gen_statem:call(?registry(Station), {rpccall, Request}).
+    MessageType = ocpp_message:request_type(Request),
+    MessageId = ocpp_message:id(Request),
+    gen_statem:call(?registry(Station), {rpccall, MessageType, MessageId, Request}).
 
 %% @doc Reply to an RPC call with a normal response.
 -spec reply(StationId :: binary(), Response :: ocpp_message:message()) ->
@@ -87,10 +89,10 @@ connected({call, From}, {connect, _}, _Data) ->
     {keep_state_and_data, [{reply, From, {error, already_connected}}]};
 connected(cast, disconnect, Data) ->
     {next_state, disconnected, cleanup_connection(Data)};
-connected({call, From}, {rpccall, {'BootNotification', _, _} = Message}, Data) ->
+connected({call, From}, {rpccall, 'BootNotification', _, Message}, Data) ->
     NewData = handle_rpccall(Message, From , Data),
     {next_state, booting, NewData};
-connected({call, From}, {rpccall, {_, MessageId, _}}, _Data) ->
+connected({call, From}, {rpccall, _, MessageId, _}, _Data) ->
     Error = ocpp_error:new('SecurityError', MessageId),
     {keep_state_and_data, [{reply, From, {error, Error}}]};
 connected(EventType, Event, Data) ->
@@ -135,9 +137,9 @@ booting(EventType, Event, Data) ->
 
 boot_pending(cast, disconnect, Data) ->
     {next_state, disconnected, cleanup_connection(Data)};
-boot_pending({call, _From}, {rpccall, {'BootNotification', _, _}}, Data) ->
+boot_pending({call, _From}, {rpccall, 'BootNotification', _, _}, Data) ->
     {next_state, connected, Data, [postpone]};
-boot_pending({call, From}, {rpccall, Message}, Data) ->
+boot_pending({call, From}, {rpccall, _, _, Message}, _Data) ->
     Error =
         ocpp_error:new(
           'SecurityError',
@@ -151,9 +153,9 @@ boot_pending({call, From}, {rpccall, Message}, Data) ->
 boot_pending(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
-provisioning({call, From}, {rpccall, {'Heartbeat', MessageId, _}}, Data) ->
+provisioning({call, From}, {rpccall, 'Heartbeat', MessageId, _}, Data) ->
     {next_state, idle, Data, [{reply, From, {ok, heartbeat_response(MessageId)}}]};
-provisioning({call, From}, {rpccall, {'StatusNotification', MessageId, _} = Message}, Data) ->
+provisioning({call, From}, {rpccall, 'StatusNotification', MessageId, Message}, Data) ->
     case update_status(Message, Data) of
         {ok, NewData} ->
             Response = {ok, ocpp_message:new_response(
@@ -170,7 +172,7 @@ provisioning(cast, disconnect, Data) ->
 provisioning(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
-idle({call, From}, {rpccall, Message}, Data) ->
+idle({call, From}, {rpccall, _, _, Message}, Data) ->
     NewData = handle_rpccall(Message, From, Data),
     {next_state, idle, NewData};
 idle(cast, {error, Error}, #data{pending = {MessageId, From}} = Data) ->
@@ -229,12 +231,6 @@ handle_rpccall(Message, From, Data) ->
 
 clear_pending_request(Data) ->
     Data#data{pending = undefined}.
-
-rpc_reply(ReplyTo, Message) ->
-    gen_statem:reply(ReplyTo, {ok, Message}).
-
-rpc_error(ReplyTo, Error) ->
-    gen_statem:reply(ReplyTo, {error, Error}).
 
 update_status(Message, Data) ->
     _Time = ocpp_message:get(<<"timestamp">>, Message),

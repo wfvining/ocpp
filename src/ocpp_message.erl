@@ -1,7 +1,8 @@
 -module(ocpp_message).
 
 -export([new_request/2, new_request/3, new_response/3,
-         properties/1, get/2, get/3, id/1, type/1]).
+         properties/1, get/2, get/3, id/1,
+         type/1, request_type/1, response_type/1]).
 
 -type message_body() :: #{binary() | string() => jerk:primterm() | message_body()}
                       | [{binary() | string(), jerk:primterm() | message_body()}].
@@ -74,7 +75,7 @@
                      | 'UpdateFirmware'.
 
 -type payload() :: jerk:jerkterm().
--type message() :: {messagetype(), messageid(), payload()}.
+-opaque message() :: {messageid(), payload()}.
 -type messageid() :: binary().
 
 -define(BASE_PATH, "urn:OCPP:Cp:2:2020:3").
@@ -86,7 +87,7 @@
 -record(msgid, {id :: binary(), path = [] :: [binary()]}).
 
 -spec properties(message()) -> [binary()].
-properties({_, _, Message}) ->
+properties({_, Message}) ->
     jerk:attributes(Message).
 
 %% @see new_request/3
@@ -99,27 +100,42 @@ new_request(MessageType, MessageBody) ->
 %% error with reason `badarg'.
 -spec new_request(messagetype(), message_body(), messageid()) -> message().
 new_request(MessageType, MessageBody, MessageId) ->
-    MsgType = atom_to_binary(MessageType),
-    SchemaURI = message_uri(<<MsgType/binary, "Request">>),
-    {MessageType, MessageId, jerk:new(SchemaURI, prepare_payload(MessageBody))}.
+    make_message(MessageType, <<"Request">>, MessageBody, MessageId).
 
 %% @doc Construct a new response term.
 -spec new_response(messagetype(), message_body(), messageid()) -> message().
 new_response(MessageType, MessageBody, MessageId) ->
+    make_message(MessageType, <<"Response">>, MessageBody, MessageId).
+
+make_message(MessageType, MessageClass, MessageBody, MessageId) ->
     MsgType = atom_to_binary(MessageType),
-    SchemaURI = message_uri(<<MsgType/binary, "Response">>),
-    {MessageType, MessageId, jerk:new(SchemaURI, prepare_payload(MessageBody))}.
+    SchemaURI = message_uri(<<MsgType/binary, MessageClass/binary>>),
+    {MessageId, jerk:new(SchemaURI, prepare_payload(MessageBody))}.
+
+message_type(Message, Class) ->
+    MsgType = type(Message),
+    {Pos, 7} = binary:match(MsgType, Class),
+    <<Type:Pos/binary, Class/binary>> = MsgType,
+    binary_to_atom(Type).
+
+-spec request_type(message()) -> messagetype().
+request_type(Message) ->
+    message_type(Message, <<"Request">>).
+
+-spec response_type(message()) -> messagetype().
+response_type(Message) ->
+    message_type(Message, <<"Response">>).
 
 -spec type(Message :: message()) -> binary().
-type({_, _MessageId, Message}) ->
+type({_MessageId, Message}) ->
     Schema = jerk:id(Message),
     hd(lists:reverse(binary:split(Schema, <<":">>, [global]))).
 
 -spec get(Key :: binary(), Message :: message()) -> jerk:primterm() | jerk:jerkterm().
-get(Key, {_, MessageId, Message}) ->
+get(Key, {MessageId, Message}) ->
     case get(string:split(Key, "/", all), decompose_msgid(MessageId), Message) of
         {SubId, Value} ->
-            {undefined, SubId, Value};
+            {SubId, Value};
         Value ->
             Value
     end.
@@ -158,7 +174,7 @@ get([Key|Rest], #msgid{path = Path} = MsgId, IntermediatValue) ->
 
 %% @doc Return the message ID.
 -spec id(Message :: message()) -> messageid().
-id({_, Id, _}) -> Id.
+id({Id, _}) -> Id.
 
 message_uri(MessageType) when is_list(MessageType) ->
     message_uri(list_to_binary(MessageType));
