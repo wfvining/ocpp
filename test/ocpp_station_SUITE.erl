@@ -37,7 +37,8 @@ all() ->
      {group, start},
      {group, disconnect},
      {group, handler},
-     {group, provisioning}].
+     {group, provisioning},
+     {group, offline}].
 
 groups() ->
     [{handler, [init_error, {group, boot_request}]},
@@ -55,7 +56,8 @@ groups() ->
                      {group, provisioning_errors}]},
      {provisioning_errors, [provision_invalid_evse, provision_invalid_connector,
                             {group, boot_pending_messages}]},
-     {boot_pending_messages, [forbidden_messages, boot_request_pending]}].
+     {boot_pending_messages, [forbidden_messages, boot_request_pending]},
+     {offline, [reconnect, restart]}].
 
 init_per_suite(Config) ->
     application:ensure_all_started(jerk),
@@ -74,6 +76,35 @@ end_per_suite(Config) ->
     application:stop(jerk),
     Config.
 
+init_per_testcase(Case, Config)
+  when Case =:= reconnect;
+       Case =:= restart ->
+    {ok, Apps} = application:ensure_all_started(gproc),
+    StationId = ?stationid(Case),
+    {ok, Sup} = ocpp_station_supersup:start_link(),
+    {ok, _} = ocpp_station_supersup:start_station(StationId, [ocpp_evse:new(1)], {testing_handler, nil}),
+    ConnPid = spawn(
+                fun F() ->
+                        ok = ocpp_station:connect(StationId),
+                        ocpp_station:rpc(StationId, ?BOOT_ACCEPT),
+                        {ok, _} = ocpp_station:rpc(
+                                    StationId,
+                                    ocpp_message:new_request(
+                                      'StatusNotification',
+                                      #{"timestamp" => ?nowutc,
+                                        "connectorStatus" => <<"Available">>,
+                                        "evseId" => 1,
+                                        "connectorId" => 1})),
+                        {ok, _} = ocpp_station:rpc(
+                                    StationId, ocpp_message:new_request('Heartbeat', #{})),
+                        receive _ -> F() end
+                end),
+    %% Give `ConnPid' enough time to get connected.
+    timer:sleep(100),
+    [{stationid, StationId},
+     {apps, Apps},
+     {supersup, Sup},
+     {connpid, ConnPid}| Config];
 init_per_testcase(Case, Config)
   when Case =:= forbidden_messages;
        Case =:= boot_request_pending ->
@@ -612,4 +643,38 @@ boot_request_pending(Config) ->
     Msg = ?BOOT_ACCEPT,
     {ok, Response} = ocpp_station:rpc(StationId, Msg),
     ?assertEqual(ocpp_message:id(Msg), ocpp_message:id(Response)),
+    ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response)).
+
+reconnect() ->
+    [{doc, "A station can reconnect and send a heartbeat or a status "
+           "notification followed by a heartbeat."},
+     {timetrap, 5000}].
+reconnect(Config) ->
+    ConnPid = ?config(connpid, Config),
+    exit(ConnPid, abnormal),
+    timer:sleep(10),
+    ok = ocpp_station:connect(?config(stationid, Config)),
+    Req = ocpp_message:new_request(
+            'StatusNotification',
+            #{"timestamp" => ?nowutc,
+              "connectorStatus" => <<"Unavailable">>,
+              "evseId" => 1,
+              "connectorId" => 1}),
+    {ok, Response} = ocpp_station:rpc(?config(stationid, Config), Req),
+    ?assertEqual(ocpp_message:id(Req), ocpp_message:id(Response)),
+    ?assertEqual('StatusNotification',
+                 ocpp_message:response_type(Response)).
+
+restart() ->
+    [{doc, "Simulate the station losing its connection because it rebooted"},
+     {timetrap, 5000}].
+restart(Config) ->
+    ConnPid = ?config(connpid, Config),
+    exit(ConnPid, abnormal),
+    timer:sleep(10),
+    StationId = ?config(stationid, Config),
+    ok = ocpp_station:connect(StationId),
+    Req = ?BOOT_ACCEPT,
+    {ok, Response} = ocpp_station:rpc(StationId, Req),
+    ?assertEqual(ocpp_message:id(Req), ocpp_message:id(Response)),
     ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response)).

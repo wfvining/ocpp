@@ -165,7 +165,9 @@ provisioning({call, From}, {rpccall, 'StatusNotification', MessageId, Message}, 
     end,
     {next_state, provisioning, UpdatedData, [{reply, From, Response}]};
 provisioning(cast, disconnect, Data) ->
-    {next_state, disconnected, cleanup_connection(Data)};
+    %% The station has already been accepted here so transition is the
+    %% same as for `idle'
+    {next_state, offline, cleanup_connection(Data)};
 provisioning(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
@@ -187,10 +189,17 @@ idle(EventType, Event, Data) ->
 
 offline({call, From}, {connect, Pid}, Data) ->
     {next_state, reconnecting, setup_connection(Data, Pid),
-     [{reply, From, ok}]};
-offline(EventType, Event, Data) ->
-    handle_event(EventType, Event, Data).
+     [{reply, From, ok}]}.
 
+reconnecting({call, _From}, {rpccall, MessageType, _, _}, Data)
+  when MessageType =:= 'Heartbeat';
+       MessageType =:= 'StatusNotification' ->
+    {next_state, provisioning, Data, [postpone]};
+reconnecting({call, _From}, {rpccall, MessageType, _, _}, Data)
+  when MessageType =:= 'BootNotification' ->
+    {next_state, connected, Data, [postpone]};
+reconnecting(cast, disconnect, Data) ->
+    {next_state, offline, cleanup_connection(Data)};
 reconnecting(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 

@@ -114,7 +114,7 @@ make_message(MessageType, MessageClass, MessageBody, MessageId) ->
 
 message_type(Message, Class) ->
     MsgType = type(Message),
-    {Pos, 7} = binary:match(MsgType, Class),
+    {Pos, _} = binary:match(MsgType, Class),
     <<Type:Pos/binary, Class/binary>> = MsgType,
     binary_to_atom(Type).
 
