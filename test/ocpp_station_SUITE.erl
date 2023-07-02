@@ -41,11 +41,11 @@ all() ->
      {group, offline}].
 
 groups() ->
-    [{handler, [init_error, {group, boot_request}]},
+    [{handler, [{group, boot_request}]},
      {boot_request, [boot_accepted, boot_rejected, boot_pending,
                      {group, boot_error}]},
      {boot_error, [handler_error_return, handler_exit, handler_error]},
-     {start, [start_after_stop, start_twice]},
+     {start, [handler_init_error, start_after_stop, start_twice]},
      {disconnect, [{group, disconnect_after},
                    disconnect_before_request,
                    disconnect_during_request]},
@@ -78,12 +78,25 @@ end_per_suite(Config) ->
     [application:stop(App) || App <- ?config(apps, Config)],
     Config.
 
+init_per_group(start, Config) ->
+    {ok, SuperSup} = ocpp_station_supersup:start_link(),
+    unlink(SuperSup),
+    [{supersup, SuperSup} | Config];
+init_per_group(_, Config) ->
+    Config.
+
+end_per_group(start, Config) ->
+    SuperSup = ?config(supersup, Config),
+    gen_server:stop(SuperSup),
+    Config;
+end_per_group(_, Config) ->
+    Config.
+
 init_per_testcase(Case, Config)
   when Case =:= reconnect;
        Case =:= restart ->
     StationId = ?stationid(Case),
-    {ok, Sup} = ocpp_station_supersup:start_link(),
-    {ok, _} = ocpp_station_supersup:start_station(StationId, [ocpp_evse:new(1)], {testing_handler, nil}),
+    {ok, StationSup} = ocpp_station_sup:start_link(StationId, [ocpp_evse:new(1)], {testing_handler, nil}),
     ConnPid = spawn(
                 fun F() ->
                         ok = ocpp_station:connect(StationId),
@@ -103,80 +116,83 @@ init_per_testcase(Case, Config)
     %% Give `ConnPid' enough time to get connected.
     timer:sleep(100),
     [{stationid, StationId},
-     {supersup, Sup},
+     {stationsup, StationSup},
      {connpid, ConnPid}| Config];
 init_per_testcase(Case, Config)
   when Case =:= forbidden_messages;
        Case =:= boot_request_pending ->
     StationId = ?stationid(provisioning),
-    {ok, Sup} = ocpp_station_supersup:start_link(),
-    {ok, _} = ocpp_station_supersup:start_station(
-                StationId,
-                [ocpp_evse:new(2), ocpp_evse:new(2)],
-                {testing_handler, nil}),
+    {ok, StationSup} = ocpp_station_sup:start_link(
+                         StationId,
+                         [ocpp_evse:new(2), ocpp_evse:new(2)],
+                         {testing_handler, nil}),
     ok = ocpp_station:connect(StationId),
     {ok, _} = ocpp_station:rpccall(StationId, ?BOOT_PENDING),
     %% Station has been accepted, but still needs to send status notifications
     %% for its connectors.
     [{stationid, StationId},
+     {stationsup, StationSup},
      {connectors, [{1, 2}, {2, 2}]},
-     {evse, 2},
-     {supersup, Sup} | Config];
+     {evse, 2} | Config];
 init_per_testcase(Case, Config)
   when Case =:= set_connector_status;
        Case =:= set_connector_status_repeat;
        Case =:= provision_invalid_evse;
        Case =:= provision_invalid_connector ->
     StationId = ?stationid(provisioning),
-    {ok, Sup} = ocpp_station_supersup:start_link(),
-    {ok, _} = ocpp_station_supersup:start_station(
-                StationId,
-                [ocpp_evse:new(2), ocpp_evse:new(2)],
-                {testing_handler, nil}),
+    {ok, StationSup} = ocpp_station_sup:start_link(
+                         StationId,
+                         [ocpp_evse:new(2), ocpp_evse:new(2)],
+                         {testing_handler, nil}),
     ok = ocpp_station:connect(StationId),
     {ok, _} = ocpp_station:rpccall(StationId, ?BOOT_ACCEPT),
     %% Station has been accepted, but still needs to send status notifications
     %% for its connectors.
     [{stationid, StationId},
      {connectors, [{1, 2}, {2, 2}]},
-     {evse, 2},
-     {supersup, Sup} | Config];
+     {stationsup, StationSup},
+     {evse, 2} | Config];
 init_per_testcase(not_supported_error = Case, Config) ->
     StationId = ?stationid(Case),
-    {ok, Sup} = ocpp_station_supersup:start_link(),
-    {ok, _} = ocpp_station_supersup:start_station(
-                StationId,
-                [ocpp_evse:new(2), ocpp_evse:new(2)],
-                {testing_handler, nil}),
+    {ok, StationSup} = ocpp_station_sup:start_link(
+                         StationId,
+                         [ocpp_evse:new(2), ocpp_evse:new(2)],
+                         {testing_handler, nil}),
     ok = ocpp_station:connect(StationId),
     {ok, _} = ocpp_station:rpccall(StationId, ?BOOT_ACCEPT),
-
     {ok, _} = ocpp_station:rpccall(
                 StationId, ocpp_message:new_request('Heartbeat', #{})),
-    [{stationid, StationId},
-     {supersup, Sup} | Config];
-init_per_testcase(init_error = Case, Config) ->
+    [{stationid, StationId}, {stationsup, StationSup}| Config];
+init_per_testcase(handler_init_error = Case, Config) ->
     StationId = ?stationid(Case),
-    {ok, Sup} = ocpp_station_supersup:start_link(),
-    [{stationid, StationId},
-     {supersup, Sup} | Config];
+    [{stationid, StationId} | Config];
+init_per_testcase(Case, Config)
+  when Case =:= start_after_stop;
+       Case =:= start_twice ->
+    StationId = ?stationid(Case),
+    {ok, StationSup} = ocpp_station_supersup:start_station(
+                         StationId, [ocpp_evse:new(1)], {testing_handler, nil}),
+    [{stationsup, StationSup}, {stationid, StationId} | Config];
 init_per_testcase(Case, Config) ->
     StationId = ?stationid(Case),
-    {ok, Sup} = ocpp_station_supersup:start_link(),
     {ok, StationSup} =
-        ocpp_station_supersup:start_station(
+        ocpp_station_sup:start_link(
           StationId,
           [ocpp_evse:new(1),
            ocpp_evse:new(1),
            ocpp_evse:new(2)],
           {testing_handler, nil}),
     [{stationid, StationId},
-     {stationsup, StationSup},
-     {supersup, Sup} | Config].
+     {stationsup, StationSup} | Config].
 
-end_per_testcase(Config) ->
-    SuperSup = ?config(supersup, Config),
-    gen_server:stop(SuperSup),
+end_per_testcase(Case, Config)
+  when Case =:= start_after_stop;
+       Case =:= start_twice;
+       Case =:= handler_init_error ->
+    Config;
+end_per_testcase(_, Config) ->
+    StationSup = ?config(stationsup, Config),
+    gen_server:stop(StationSup),
     timer:sleep(100),
     Config.
 
@@ -193,7 +209,10 @@ start_twice(Config) ->
     StationId = ?config(stationid, Config),
     ManagerPid = ocpp_station_manager:whereis(StationId),
     {error, {already_started, ManagerPid}} =
-        ocpp_station_supersup:start_station(StationId, 2, {testing_handler, nil}).
+        ocpp_station_supersup:start_station(
+          StationId,
+          [ocpp_evse:new(2), ocpp_evse:new(2)],
+          {testing_handler, nil}).
 
 start_after_stop() ->
     [{doc, "Can start and connect to a station with the "
@@ -210,10 +229,10 @@ start_after_stop(Config) ->
           StationId, [ocpp_evse:new(1)], {testing_handler, nil}),
     ok = ocpp_station:connect(StationId).
 
-init_error() ->
+handler_init_error() ->
     [{doc, "The station is not started if there is an error from "
       "the handler callback module's init/1 function."}].
-init_error(Config) ->
+handler_init_error(Config) ->
     StationId = ?config(stationid, Config),
     {error, {handler, {init, 'init error test'}}} =
         ocpp_station_supersup:start_station(
