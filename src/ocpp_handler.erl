@@ -1,6 +1,15 @@
-%%% @doc An OTP compliant behavior that is to be used by implementors
+%%% @doc An OTP compliant behavior that is to be used by implementers
 %%% of charging station management systems to connect their business
 %%% logic with OCPP.
+%%%
+%%% The only required callback is `init/1'. All others are
+%%% optional. If `handle_info/2' is not implemented, info messages are
+%%% dropped. Any OCPP message type for which the corresponding
+%%% callback is unimplemented will receive an error response with the
+%%% error code `"NotSupported"'.
+%%%
+%%% <b>Note:</b> All exported functions from this module are used
+%%% internally by the ocpp application and should not be called directly.
 %%% @end
 %%%
 %%% Copyright (c) 2023 Will Vining <wfv@vining.dev>
@@ -19,6 +28,9 @@
 -export([rpc_request/2]).
 %% gen_event callbacks
 -export([init/1, handle_event/2, handle_call/2]).
+
+-export_type([boot_status/0, boot_response/0, status_info/0]).
+-export_type([handler_error/0, handler_ret/1]).
 
 -record(state, {handler_state :: any(),
                 init_arg :: any(),
@@ -48,15 +60,16 @@
 
 %%% ========= Callback Definitions =========
 
-%% @doc Initialize the handler state.
 -callback init(InitArg :: any()) -> {ok, State :: any()} | {error, Reason :: any()}.
+%% Initialize any internal state the handler will need when responding
+%% to requests.
 
-%% @doc Handle events that are not OCPP messages.
 -callback handle_info(any(), State :: any()) -> {ok, NewState :: any()}.
+%% Handle events that are not OCPP messages.
 
-%% @doc Handle a BootNotificationRequest.
 -callback boot_notification(Req :: request(), State :: any()) ->
     handler_ret(boot_response()).
+%% Handle a BootNotificationRequest.
 
 -optional_callbacks([boot_notification/2, handle_info/2]).
 
@@ -68,8 +81,9 @@
 start_link(StationId) ->
     gen_event:start_link(?registry(StationId)).
 
-%% @doc Install the CSMS handler module as the handler for OCPP
-%% Messages.
+%% @doc Install `CallbackModule' as the handler for OCPP Messages.
+%%
+%% This function is used internally and should not be called directly.
 -spec add_handler(StationId :: binary(),
                   CallbackModule :: module(),
                   InitArg :: any()) -> gen_event:add_handler_ret().
@@ -78,6 +92,8 @@ add_handler(StationId, CallbackModule, InitArg) ->
       ?registry(StationId), ?MODULE, {StationId, CallbackModule, InitArg}).
 
 %% @doc Re-install the handler after a crash.
+%%
+%% This function is used internally and should not be called directly.
 -spec add_handler(StationId :: binary(),
                   CallbackModule :: module(),
                   InitArg :: any(),
@@ -88,6 +104,8 @@ add_handler(StationId, CallbackModule, InitArg, Reason) ->
       {recover, Reason, {StationId, CallbackModule, InitArg}}).
 
 %% @doc Notify the event manager that an RPC Request has been received.
+%%
+%% This function is used internally and should not be called directly.
 -spec rpc_request(StationId :: binary(), Request :: term()) -> ok.
 rpc_request(StationId, Request) ->
     gen_event:notify(?registry(StationId), {rpc_request, Request}).

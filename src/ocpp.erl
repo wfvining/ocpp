@@ -18,7 +18,7 @@
 %% @param NumEVSE the number of EVSE connected to this station.
 %% @param Handler a tuple specifying the callback module that will
 %%        handler OCPP requests for the CSMS and the argument passed
-%%        to its `init/1` callback.
+%%        to its `init/1' callback.
 %%
 %% @end
 -spec add_station(StationId :: binary(),

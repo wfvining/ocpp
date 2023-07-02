@@ -36,7 +36,7 @@
 
 -opaque error() :: #error{}.
 
-%% @equiv new(Code, MessageId, []).
+%% @equiv new(Code, MessageId, [])
 -spec new(Code :: code(), MessageId :: binary()) -> error().
 new(Code, MessageId) -> new(Code, MessageId, []).
 
