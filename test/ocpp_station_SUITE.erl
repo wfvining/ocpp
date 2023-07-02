@@ -59,11 +59,6 @@ groups() ->
      {boot_pending_messages, [forbidden_messages, boot_request_pending]},
      {offline, [reconnect, restart]}].
 
-init_per_suite(Config) ->
-    application:ensure_all_started(jerk),
-    %% Load the schemas.
-    load_schemas(),
-    Config.
 
 load_schemas() ->
     PrivDir = code:priv_dir(ocpp),
@@ -72,14 +67,20 @@ load_schemas() ->
     [jerk:load_schema(filename:join(SchemaDir, SchemaFile))
      || SchemaFile <- Files].
 
+init_per_suite(Config) ->
+    {ok, JerkApps} = application:ensure_all_started(jerk),
+    {ok, GProcApps} = application:ensure_all_started(gproc),
+    %% Load the schemas.
+    load_schemas(),
+    [{apps, JerkApps ++ GProcApps} | Config].
+
 end_per_suite(Config) ->
-    application:stop(jerk),
+    [application:stop(App) || App <- ?config(apps, Config)],
     Config.
 
 init_per_testcase(Case, Config)
   when Case =:= reconnect;
        Case =:= restart ->
-    {ok, Apps} = application:ensure_all_started(gproc),
     StationId = ?stationid(Case),
     {ok, Sup} = ocpp_station_supersup:start_link(),
     {ok, _} = ocpp_station_supersup:start_station(StationId, [ocpp_evse:new(1)], {testing_handler, nil}),
@@ -102,13 +103,11 @@ init_per_testcase(Case, Config)
     %% Give `ConnPid' enough time to get connected.
     timer:sleep(100),
     [{stationid, StationId},
-     {apps, Apps},
      {supersup, Sup},
      {connpid, ConnPid}| Config];
 init_per_testcase(Case, Config)
   when Case =:= forbidden_messages;
        Case =:= boot_request_pending ->
-    {ok, Apps} = application:ensure_all_started(gproc),
     StationId = ?stationid(provisioning),
     {ok, Sup} = ocpp_station_supersup:start_link(),
     {ok, _} = ocpp_station_supersup:start_station(
@@ -122,14 +121,12 @@ init_per_testcase(Case, Config)
     [{stationid, StationId},
      {connectors, [{1, 2}, {2, 2}]},
      {evse, 2},
-     {apps, Apps},
      {supersup, Sup} | Config];
 init_per_testcase(Case, Config)
   when Case =:= set_connector_status;
        Case =:= set_connector_status_repeat;
        Case =:= provision_invalid_evse;
        Case =:= provision_invalid_connector ->
-    {ok, Apps} = application:ensure_all_started(gproc),
     StationId = ?stationid(provisioning),
     {ok, Sup} = ocpp_station_supersup:start_link(),
     {ok, _} = ocpp_station_supersup:start_station(
@@ -143,10 +140,8 @@ init_per_testcase(Case, Config)
     [{stationid, StationId},
      {connectors, [{1, 2}, {2, 2}]},
      {evse, 2},
-     {apps, Apps},
      {supersup, Sup} | Config];
 init_per_testcase(not_supported_error = Case, Config) ->
-    {ok, Apps} = application:ensure_all_started(gproc),
     StationId = ?stationid(Case),
     {ok, Sup} = ocpp_station_supersup:start_link(),
     {ok, _} = ocpp_station_supersup:start_station(
@@ -159,17 +154,13 @@ init_per_testcase(not_supported_error = Case, Config) ->
     {ok, _} = ocpp_station:rpccall(
                 StationId, ocpp_message:new_request('Heartbeat', #{})),
     [{stationid, StationId},
-     {apps, Apps},
      {supersup, Sup} | Config];
 init_per_testcase(init_error = Case, Config) ->
-    {ok, Apps} = application:ensure_all_started(gproc),
     StationId = ?stationid(Case),
     {ok, Sup} = ocpp_station_supersup:start_link(),
     [{stationid, StationId},
-     {apps, Apps},
      {supersup, Sup} | Config];
 init_per_testcase(Case, Config) ->
-    {ok, Apps} = application:ensure_all_started(gproc),
     StationId = ?stationid(Case),
     {ok, Sup} = ocpp_station_supersup:start_link(),
     {ok, StationSup} =
@@ -180,14 +171,12 @@ init_per_testcase(Case, Config) ->
            ocpp_evse:new(2)],
           {testing_handler, nil}),
     [{stationid, StationId},
-     {ok, Apps},
      {stationsup, StationSup},
      {supersup, Sup} | Config].
 
 end_per_testcase(Config) ->
     SuperSup = ?config(supersup, Config),
     gen_server:stop(SuperSup),
-    [application:stop(App) || App <- ?config(apps, Config)],
     timer:sleep(100),
     Config.
 
