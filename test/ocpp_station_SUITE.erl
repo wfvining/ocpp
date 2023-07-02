@@ -86,8 +86,8 @@ init_per_testcase(Case, Config)
     ConnPid = spawn(
                 fun F() ->
                         ok = ocpp_station:connect(StationId),
-                        ocpp_station:rpc(StationId, ?BOOT_ACCEPT),
-                        {ok, _} = ocpp_station:rpc(
+                        ocpp_station:rpccall(StationId, ?BOOT_ACCEPT),
+                        {ok, _} = ocpp_station:rpccall(
                                     StationId,
                                     ocpp_message:new_request(
                                       'StatusNotification',
@@ -95,7 +95,7 @@ init_per_testcase(Case, Config)
                                         "connectorStatus" => <<"Available">>,
                                         "evseId" => 1,
                                         "connectorId" => 1})),
-                        {ok, _} = ocpp_station:rpc(
+                        {ok, _} = ocpp_station:rpccall(
                                     StationId, ocpp_message:new_request('Heartbeat', #{})),
                         receive _ -> F() end
                 end),
@@ -116,7 +116,7 @@ init_per_testcase(Case, Config)
                 [ocpp_evse:new(2), ocpp_evse:new(2)],
                 {testing_handler, nil}),
     ok = ocpp_station:connect(StationId),
-    {ok, _} = ocpp_station:rpc(StationId, ?BOOT_PENDING),
+    {ok, _} = ocpp_station:rpccall(StationId, ?BOOT_PENDING),
     %% Station has been accepted, but still needs to send status notifications
     %% for its connectors.
     [{stationid, StationId},
@@ -137,7 +137,7 @@ init_per_testcase(Case, Config)
                 [ocpp_evse:new(2), ocpp_evse:new(2)],
                 {testing_handler, nil}),
     ok = ocpp_station:connect(StationId),
-    {ok, _} = ocpp_station:rpc(StationId, ?BOOT_ACCEPT),
+    {ok, _} = ocpp_station:rpccall(StationId, ?BOOT_ACCEPT),
     %% Station has been accepted, but still needs to send status notifications
     %% for its connectors.
     [{stationid, StationId},
@@ -154,9 +154,9 @@ init_per_testcase(not_supported_error = Case, Config) ->
                 [ocpp_evse:new(2), ocpp_evse:new(2)],
                 {testing_handler, nil}),
     ok = ocpp_station:connect(StationId),
-    {ok, _} = ocpp_station:rpc(StationId, ?BOOT_ACCEPT),
+    {ok, _} = ocpp_station:rpccall(StationId, ?BOOT_ACCEPT),
 
-    {ok, _} = ocpp_station:rpc(
+    {ok, _} = ocpp_station:rpccall(
                 StationId, ocpp_message:new_request('Heartbeat', #{})),
     [{stationid, StationId},
      {apps, Apps},
@@ -242,7 +242,7 @@ message_before_boot_request(Config) ->
     StationId = ?config(stationid, Config),
     ok = ocpp_station:connect(StationId),
     Message = ocpp_message:new_request('Heartbeat', #{}),
-    {error, Error} = ocpp_station:rpc(
+    {error, Error} = ocpp_station:rpccall(
                        StationId,
                        Message),
     ?assertEqual(<<"SecurityError">>, ocpp_error:code(Error)),
@@ -295,7 +295,7 @@ do_boot_test(Action, ExpectedStatus, StationId) ->
                 "currentTime" => TimeStr,
                 "vendorId" => <<"foo">>}},
     Req = ocpp_message:new_request('BootNotification', Payload),
-    {ok, Response} = ocpp_station:rpc(StationId, Req),
+    {ok, Response} = ocpp_station:rpccall(StationId, Req),
     ?assertEqual(ExpectedStatus, ocpp_message:get(<<"status">>, Response)),
     ?assertEqual(Interval, ocpp_message:get(<<"interval">>, Response)),
     ?assertEqual(ocpp_message:id(Req), ocpp_message:id(Response)),
@@ -318,7 +318,7 @@ handler_error_return(Config) ->
                 "errorReason" => <<"because error">>,
                 "vendorId" => <<"handle_error_return">>}},
     Req = ocpp_message:new_request('BootNotification', Payload),
-    {error, Error} = ocpp_station:rpc(StationId, Req),
+    {error, Error} = ocpp_station:rpccall(StationId, Req),
     %% There are 4 components to an OCPP error:
     %% 1. MessageId
     %% 2. ErrorCode (NotSupported, InternalError...)
@@ -351,7 +351,7 @@ handler_error(Config) ->
                 "errorReason" => <<"because error/1">>,
                 "vendorId" => <<"handle_error">>}},
     Req = ocpp_message:new_request('BootNotification', Payload),
-    {error, Error} = ocpp_station:rpc(StationId, Req),
+    {error, Error} = ocpp_station:rpccall(StationId, Req),
     ?assertEqual(ocpp_message:id(Req), ocpp_error:id(Error)),
     ?assertEqual(<<"InternalError">>, ocpp_error:code(Error)),
     ?assertEqual(<<"An internal error occurred and the receiver "
@@ -379,7 +379,7 @@ handler_exit(Config) ->
                 "errorReason" => <<"because exit/1">>,
                 "vendorId" => <<"handle_exit">>}},
     Req = ocpp_message:new_request('BootNotification', Payload),
-    {error, Error} = ocpp_station:rpc(StationId, Req),
+    {error, Error} = ocpp_station:rpccall(StationId, Req),
         ?assertEqual(ocpp_message:id(Req), ocpp_error:id(Error)),
     ?assertEqual(<<"InternalError">>, ocpp_error:code(Error)),
     ?assertEqual(<<"An internal error occurred and the receiver "
@@ -398,7 +398,7 @@ test_new_boot_request_works(StationId, Payload) ->
                               "currentTime" => <<"2023-06-15T15:30.00Z">>,
                               "vendorId" => <<"handle_error">>}}),
     ct:log("trying new message..."),
-    {ok, Response} = ocpp_station:rpc(StationId, NewReq),
+    {ok, Response} = ocpp_station:rpccall(StationId, NewReq),
     ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response)).
 
 disconnect_after_accept() ->
@@ -425,7 +425,7 @@ disconnect_after_x(Station, TestAction) ->
     F = fun () ->
                 ok = ocpp_station:connect(Station),
                 {ok, Response} =
-                    ocpp_station:rpc(
+                    ocpp_station:rpccall(
                       Station,
                       ocpp_message:new_request(
                         'BootNotification',
@@ -501,7 +501,7 @@ disconnect_during_request(Config) ->
     F = fun() ->
                 ok = ocpp_station:connect(Station),
                 {ok, _Response} =
-                    ocpp_station:rpc(
+                    ocpp_station:rpccall(
                       Station, ocpp_message:new_request('BootNotification', Req))
         end,
     {Pid, Ref} = spawn_monitor(F),
@@ -515,7 +515,7 @@ disconnect_during_request(Config) ->
                     'BootNotification',
                     Req#{"customData" =>
                              CustomData#{"testAction" => <<"ACCEPT">>}}),
-            {ok, Response} = ocpp_station:rpc(Station, Msg),
+            {ok, Response} = ocpp_station:rpccall(Station, Msg),
             ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response));
         _ ->
             ct:log("Unnexepcted message received in test case"),
@@ -533,7 +533,7 @@ not_supported_error(Config) ->
     Req = #{"iso15118SchemaVersion" => <<"1">>,
             "action" => <<"Install">>,
             "exiRequest" => <<"abcdefg">>},
-    {error, Response} = ocpp_station:rpc(Station, ocpp_message:new_request(Msg, Req)),
+    {error, Response} = ocpp_station:rpccall(Station, ocpp_message:new_request(Msg, Req)),
     ?assertEqual(<<"NotSupported">>, ocpp_error:code(Response)).
 
 set_connector_status() ->
@@ -555,7 +555,7 @@ set_connector_status(Config) ->
                        "connectorStatus" => <<"Unavailable">>,
                        "evseId" => EVSE,
                        "connectorId" => ConnId}),
-             {ocpp_station:rpc(StationId, Msg), ocpp_message:id(Msg)}
+             {ocpp_station:rpccall(StationId, Msg), ocpp_message:id(Msg)}
          end
          || {EVSE, ConnId} <- Conn],
     lists:foreach(
@@ -575,7 +575,7 @@ set_connector_status(Config) ->
                        "connectorStatus" => <<"Available">>,
                        "evseId" => EVSE,
                        "connectorId" => ConnId}),
-             {ocpp_station:rpc(StationId, Msg), ocpp_message:id(Msg)}
+             {ocpp_station:rpccall(StationId, Msg), ocpp_message:id(Msg)}
          end
          || {EVSE, ConnId} <- Conn],
     lists:foreach(
@@ -614,7 +614,7 @@ provision_invalid(StationId, EVSEId, ConnId) ->
               "connectorStatus" => <<"Available">>,
               "evseId" => EVSEId,
               "connectorId" => ConnId}),
-    {error, Reason} = ocpp_station:rpc(StationId, Msg),
+    {error, Reason} = ocpp_station:rpccall(StationId, Msg),
     ?assertEqual(ocpp_message:id(Msg), ocpp_error:id(Reason)),
     ?assertEqual(<<"GenericError">>, ocpp_error:code(Reason)).
 
@@ -631,7 +631,7 @@ forbidden_messages(Config) ->
               "connectorStatus" => <<"Available">>,
               "evseId" => 1,
               "connectorId" => 1}),
-    {error, Reason} = ocpp_station:rpc(StationId, Msg),
+    {error, Reason} = ocpp_station:rpccall(StationId, Msg),
     ?assertEqual(ocpp_message:id(Msg), ocpp_error:id(Reason)),
     ?assertEqual(<<"SecurityError">>, ocpp_error:code(Reason)).
 
@@ -641,7 +641,7 @@ boot_request_pending() ->
 boot_request_pending(Config) ->
     StationId = ?config(stationid, Config),
     Msg = ?BOOT_ACCEPT,
-    {ok, Response} = ocpp_station:rpc(StationId, Msg),
+    {ok, Response} = ocpp_station:rpccall(StationId, Msg),
     ?assertEqual(ocpp_message:id(Msg), ocpp_message:id(Response)),
     ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response)).
 
@@ -660,7 +660,7 @@ reconnect(Config) ->
               "connectorStatus" => <<"Unavailable">>,
               "evseId" => 1,
               "connectorId" => 1}),
-    {ok, Response} = ocpp_station:rpc(?config(stationid, Config), Req),
+    {ok, Response} = ocpp_station:rpccall(?config(stationid, Config), Req),
     ?assertEqual(ocpp_message:id(Req), ocpp_message:id(Response)),
     ?assertEqual('StatusNotification',
                  ocpp_message:response_type(Response)).
@@ -675,6 +675,6 @@ restart(Config) ->
     StationId = ?config(stationid, Config),
     ok = ocpp_station:connect(StationId),
     Req = ?BOOT_ACCEPT,
-    {ok, Response} = ocpp_station:rpc(StationId, Req),
+    {ok, Response} = ocpp_station:rpccall(StationId, Req),
     ?assertEqual(ocpp_message:id(Req), ocpp_message:id(Response)),
     ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response)).

@@ -7,7 +7,7 @@
 
 -behaviour(gen_statem).
 
--export([start_link/2, stop/1, rpc/2, reply/2, error/2, connect/1]).
+-export([start_link/2, stop/1, rpccall/2, reply/2, error/2, connect/1]).
 
 -export([init/1, callback_mode/0, code_change/3, terminate/3]).
 
@@ -49,11 +49,11 @@ start_link(StationId, EVSE) ->
 connect(Station) ->
     gen_statem:call(?registry(Station), {connect, self()}).
 
-%% @doc Handle an OCPP remote procedure call.
--spec rpc(Station :: binary(), Request :: ocpp_message:message()) ->
+%% @doc Handle an OCPP remote procedure call from the station.
+-spec rpccall(Station :: binary(), Request :: ocpp_message:message()) ->
           {ok, Response :: ocpp_message:message()} |
           {error, Reason :: ocpp_rpc:rpcerror()}.
-rpc(Station, Request) ->
+rpccall(Station, Request) ->
     MessageType = ocpp_message:request_type(Request),
     MessageId = ocpp_message:id(Request),
     gen_statem:call(?registry(Station), {rpccall, MessageType, MessageId, Request}).
