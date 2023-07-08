@@ -203,10 +203,15 @@ prepare_value(V) when is_list(V) ->
         true ->
             prepare_payload(V);
         false ->
-            V
+            prepare_array(V)
     end;
 prepare_value(V) ->
     V.
+
+prepare_array([]) -> [];
+prepare_array([H|T]) when is_map(H) -> [prepare_payload(H) | prepare_array(T)];
+prepare_array([H|T]) -> [H | prepare_array(T)].
+
 
 is_property_list([]) -> false;
 is_property_list(List) ->
