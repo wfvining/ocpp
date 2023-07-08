@@ -1,4 +1,13 @@
 %%% @doc representation of a charging station within the CSMS.
+%%%
+%%% Several API functions come in pairs where one function is prefixed
+%%% with `rpc'. These pairs differentiate between messages flowing
+%%% from the CSMS to the station and messages flowing from the station
+%%% to the CSMS. Functions with the `rpc' prefix (e.g. `rpccall') are
+%%% used to notify the state machine of messages arriving at the CSMS
+%%% while functions without the prefix (e.g. `call/2') are used to
+%%% send messages from the CSMS to the station.
+%%%
 %%% @end
 %%%
 %%% Copyright (c) 2023 Will Vining <wfv@vining.dev>
@@ -7,7 +16,11 @@
 
 -behaviour(gen_statem).
 
--export([start_link/2, stop/1, rpccall/2, reply/2, error/2, connect/1]).
+-export([start_link/2, stop/1,
+         call/2, rpccall/2,
+         reply/2, %rpcreply/2,
+         error/2, %rpcerror/2,
+         connect/1]).
 
 -export([init/1, callback_mode/0, code_change/3, terminate/3]).
 
@@ -64,6 +77,16 @@ rpccall(Station, Request) ->
 reply(StationId, Response) ->
     gen_statem:cast(?registry(StationId), {reply, Response}).
 
+%% @doc Send an RPCCALL message to the station. If there is an
+%% outstanding request that has already been sent to the station this
+%% will return `{error, busy}'. If the station is not connected
+%% `{error, offline}' will be returned.
+-spec call(Station :: binary(), Request :: ocpp_message:message()) ->
+          {ok, CallRef :: reference()} |
+          {error, Reason :: busy | offline}.
+call(Station, Request) ->
+    gen_statem:call(?registry(Station), {call, Request}).
+
 %% @doc Reply to an RPC call with an error.
 -spec error(StationId :: binary(), Error :: ocpp_error:error()) -> ok.
 error(StationId, Error) ->
@@ -83,7 +106,9 @@ init({StationId, EVSESpecs}) ->
 disconnected({call, From}, {connect, ConnectionPid}, Data) ->
     {next_state, connected,
      setup_connection(Data, ConnectionPid),
-     [{reply, From, ok}]}.
+     [{reply, From, ok}]};
+disconnected({call, From}, {call, _}, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, not_connected}}]}.
 
 connected({call, From}, {connect, _}, _Data) ->
     {keep_state_and_data, [{reply, From, {error, already_connected}}]};
@@ -95,6 +120,8 @@ connected({call, From}, {rpccall, 'BootNotification', _, Message}, Data) ->
 connected({call, From}, {rpccall, _, MessageId, _}, _Data) ->
     Error = ocpp_error:new('SecurityError', MessageId),
     {keep_state_and_data, [{reply, From, {error, Error}}]};
+connected({call, From}, {call, _}, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, not_accepted}}]};
 connected(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
@@ -189,7 +216,9 @@ idle(EventType, Event, Data) ->
 
 offline({call, From}, {connect, Pid}, Data) ->
     {next_state, reconnecting, setup_connection(Data, Pid),
-     [{reply, From, ok}]}.
+     [{reply, From, ok}]};
+offline({call, From}, {call, _}, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, offline}}]}.
 
 reconnecting({call, _From}, {rpccall, MessageType, _, _}, Data)
   when MessageType =:= 'Heartbeat';
@@ -198,6 +227,8 @@ reconnecting({call, _From}, {rpccall, MessageType, _, _}, Data)
 reconnecting({call, _From}, {rpccall, MessageType, _, _}, Data)
   when MessageType =:= 'BootNotification' ->
     {next_state, connected, Data, [postpone]};
+reconnecting({call, From}, {call, _}, _Data) ->
+    {keep_state_and_data, [{reply, From, {error, offline}}]};
 reconnecting(cast, disconnect, Data) ->
     {next_state, offline, cleanup_connection(Data)};
 reconnecting(EventType, Event, Data) ->

@@ -30,6 +30,16 @@
 -define(BOOT_REJECT, ?BOOT(<<"REJECT">>)).
 -define(BOOT_PENDING, ?BOOT(<<"PENDING">>)).
 
+-define(HEARTBEAT, ocpp_message:new_request('Heartbeat', #{})).
+
+-define(SET_VARIABLES,
+        ocpp_message:new_request(
+          'SetVariables',
+          #{"setVariableData" =>
+                [#{"attributeValue" => <<"Foo">>,
+                   "component" => #{"name" => <<"ComponentFoo">>},
+                   "variable" => #{"name" => <<"VariableBar">>}}]})).
+
 all() ->
     [connect_station,
      not_supported_error,
@@ -38,7 +48,8 @@ all() ->
      {group, disconnect},
      {group, handler},
      {group, provisioning},
-     {group, offline}].
+     {group, offline},
+     {group, configuration}].
 
 groups() ->
     [{handler, [{group, boot_request}]},
@@ -57,8 +68,12 @@ groups() ->
      {provisioning_errors, [provision_invalid_evse, provision_invalid_connector,
                             {group, boot_pending_messages}]},
      {boot_pending_messages, [forbidden_messages, boot_request_pending]},
-     {offline, [reconnect, restart]}].
-
+     {offline, [reconnect, restart]},
+     {configuration, [{group, set_variables}]},
+     {set_variables, [{group, set_variables_error}]},
+     {set_variables_error, [set_variables_disconnected,
+                            set_variables_rejected,
+                            set_variables_offline]}].
 
 load_schemas() ->
     PrivDir = code:priv_dir(ocpp),
@@ -94,7 +109,8 @@ end_per_group(_, Config) ->
 
 init_per_testcase(Case, Config)
   when Case =:= reconnect;
-       Case =:= restart ->
+       Case =:= restart;
+       Case =:= set_variables_offline ->
     StationId = ?stationid(Case),
     {ok, StationSup} = ocpp_station_sup:start_link(StationId, [ocpp_evse:new(1)], {testing_handler, nil}),
     ConnPid = spawn(
@@ -114,7 +130,7 @@ init_per_testcase(Case, Config)
                         receive _ -> F() end
                 end),
     %% Give `ConnPid' enough time to get connected.
-    timer:sleep(100),
+    timer:sleep(10),
     [{stationid, StationId},
      {stationsup, StationSup},
      {connpid, ConnPid}| Config];
@@ -160,8 +176,7 @@ init_per_testcase(not_supported_error = Case, Config) ->
                          {testing_handler, nil}),
     ok = ocpp_station:connect(StationId),
     {ok, _} = ocpp_station:rpccall(StationId, ?BOOT_ACCEPT),
-    {ok, _} = ocpp_station:rpccall(
-                StationId, ocpp_message:new_request('Heartbeat', #{})),
+    {ok, _} = ocpp_station:rpccall(StationId, ?HEARTBEAT),
     [{stationid, StationId}, {stationsup, StationSup}| Config];
 init_per_testcase(handler_init_error = Case, Config) ->
     StationId = ?stationid(Case),
@@ -173,14 +188,28 @@ init_per_testcase(Case, Config)
     {ok, StationSup} = ocpp_station_supersup:start_station(
                          StationId, [ocpp_evse:new(1)], {testing_handler, nil}),
     [{stationsup, StationSup}, {stationid, StationId} | Config];
+init_per_testcase(set_variables_rejected = Case, Config0) ->
+    StationId = ?stationid(Case),
+    Config = start_station(StationId, Config0),
+    ok = ocpp_station:connect(StationId),
+    {ok, Response} = ocpp_station:rpccall(StationId, ?BOOT_REJECT),
+    ?assertEqual(<<"Rejected">>, ocpp_message:get(<<"status">>, Response)),
+    Config;
 init_per_testcase(Case, Config) ->
     StationId = ?stationid(Case),
+    start_station(
+      StationId,
+      [ocpp_evse:new(1), ocpp_evse:new(1), ocpp_evse:new(2)],
+      Config).
+
+start_station(StationId, Config) ->
+    start_station(StationId, [ocpp_evse:new(1)], Config).
+
+start_station(StationId, EVSE, Config) ->
     {ok, StationSup} =
         ocpp_station_sup:start_link(
           StationId,
-          [ocpp_evse:new(1),
-           ocpp_evse:new(1),
-           ocpp_evse:new(2)],
+          EVSE,
           {testing_handler, nil}),
     [{stationid, StationId},
      {stationsup, StationSup} | Config].
@@ -191,10 +220,13 @@ end_per_testcase(Case, Config)
        Case =:= handler_init_error ->
     Config;
 end_per_testcase(_, Config) ->
-    StationSup = ?config(stationsup, Config),
-    gen_server:stop(StationSup),
-    timer:sleep(100),
-    Config.
+    case ?config(stationsup, Config) of
+        undefined -> Config;
+        StationSup ->
+            gen_server:stop(StationSup),
+            timer:sleep(100),
+            Config
+    end.
 
 connect_station() ->
     [{doc, "Can only connect to a station once."}].
@@ -686,3 +718,35 @@ restart(Config) ->
     {ok, Response} = ocpp_station:rpccall(StationId, Req),
     ?assertEqual(ocpp_message:id(Req), ocpp_message:id(Response)),
     ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"status">>, Response)).
+
+set_variables_disconnected() ->
+    [{doc, "Attempt to send a SetVariables request when the station "
+           "is disconnected results in {error, offline} being returned."},
+     {timetrap, 1000}].
+set_variables_disconnected(Config) ->
+    StationId = ?config(stationid, Config),
+    Request = ?SET_VARIABLES,
+    {error, not_connected} = ocpp_station:call(StationId, Request).
+
+set_variables_offline() ->
+    [{doc, "Attempt to send a SetVariables request when the station is offline "
+           "results in a {error, offline} returned."},
+     {timetrap, 1000}].
+set_variables_offline(Config) ->
+    StationId = ?config(stationid, Config),
+    ConnPid = ?config(connpid, Config),
+    exit(ConnPid, abnormal),
+    timer:sleep(5),
+    {error, offline} = ocpp_station:call(StationId, ?SET_VARIABLES),
+    ok = ocpp_station:connect(StationId),
+    %% Still offline because we don't know if the station rebooted or
+    %% just lost its connection.
+    {error, offline} = ocpp_station:call(StationId, ?SET_VARIABLES).
+
+set_variables_rejected() ->
+    [{doc, "Attempt to send a SetVariables request after rejecting "
+           "the station returns {error, not_connected}"},
+     {timetrap, 1000}].
+set_variables_rejected(Config) ->
+    StationId = ?config(stationid, Config),
+    {error, not_accepted} = ocpp_station:call(StationId, ?SET_VARIABLES).
