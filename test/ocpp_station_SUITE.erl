@@ -69,8 +69,8 @@ groups() ->
                             {group, boot_pending_messages}]},
      {boot_pending_messages, [forbidden_messages, boot_request_pending]},
      {offline, [reconnect, restart]},
-     {configuration, [{group, set_variables}]},
-     {set_variables, [{group, set_variables_error}]},
+     {configuration, [{group, set_variables_error}, {group, set_variables}]},
+     {set_variables, [sequence], [set_variables_send_request, set_variables_receive_request]},
      {set_variables_error, [set_variables_disconnected,
                             set_variables_rejected,
                             set_variables_offline]}].
@@ -97,9 +97,44 @@ init_per_group(start, Config) ->
     {ok, SuperSup} = ocpp_station_supersup:start_link(),
     unlink(SuperSup),
     [{supersup, SuperSup} | Config];
+init_per_group(set_variables, Config) ->
+    StationId = ?stationid(set_variables),
+    {ok, Sup} = ocpp_station_sup:start_link(
+                  StationId, [ocpp_evse:new(1)], {testing_handler, nil}),
+    ConnPid = spawn(
+                fun () ->
+                        ok = ocpp_station:connect(StationId),
+                        {ok, _} = ocpp_station:rpccall(StationId, ?BOOT_ACCEPT),
+                        {ok, _} = ocpp_station:rpccall(StationId, ?HEARTBEAT),
+                        L = fun Loop(P) ->
+                                    receive
+                                        stop ->
+                                            ok;
+                                        M ->
+                                            P ! M,
+                                            Loop(P)
+                                    end
+                            end,
+                        receive
+                            {forward, Pid} ->
+                                L(Pid)
+                        end
+                end),
+    timer:sleep(100),
+    unlink(Sup),
+    [{message, ?SET_VARIABLES},
+     {station_id, StationId},
+     {station_sup, Sup},
+     {connpid, ConnPid} | Config];
 init_per_group(_, Config) ->
     Config.
 
+end_per_group(set_variables, Config) ->
+    StationSup = ?config(station_sup, Config),
+    gen_server:stop(StationSup),
+    Conn = ?config(connpid, Config),
+    Conn ! stop,
+    timer:sleep(10);
 end_per_group(start, Config) ->
     SuperSup = ?config(supersup, Config),
     gen_server:stop(SuperSup),
@@ -107,6 +142,9 @@ end_per_group(start, Config) ->
 end_per_group(_, Config) ->
     Config.
 
+init_per_testcase(Case, Config)
+  when Case =:= set_variables_send_request ->
+    Config;
 init_per_testcase(Case, Config)
   when Case =:= reconnect;
        Case =:= restart;
@@ -213,6 +251,11 @@ start_station(StationId, EVSE, Config) ->
           {testing_handler, nil}),
     [{stationid, StationId},
      {stationsup, StationSup} | Config].
+
+provision_station(StationId) ->
+    {ok, _} = ocpp_station:rpccall(StationId, ?BOOT_ACCEPT),
+    {ok, _} = ocpp_station:rpccall(StationId, ?HEARTBEAT),
+    ok.
 
 end_per_testcase(Case, Config)
   when Case =:= start_after_stop;
@@ -750,3 +793,24 @@ set_variables_rejected() ->
 set_variables_rejected(Config) ->
     StationId = ?config(stationid, Config),
     {error, not_accepted} = ocpp_station:call(StationId, ?SET_VARIABLES).
+
+set_variables_send_request() ->
+    [{doc, "A SetVariablesRequest can be sent to the station"},
+     {timetrap, 1000}].
+set_variables_send_request(Config) ->
+    StationId = ?config(station_id, Config),
+    Msg = ?config(message, Config),
+    ok = ocpp_station:call(StationId, Msg).
+
+set_variables_receive_request() ->
+    [{doc, "The SetVariablseRequest is received by the connected process"},
+     {timetrap, 2000}].
+set_variables_receive_request(Config) ->
+    Conn = ?config(connpid, Config),
+    Conn ! {forward, self()},
+    Msg = ?config(message, Config),
+    receive
+        {ocpp, {call, Message}} ->
+            ?assertEqual('SetVariables', ocpp_message:request_type(Message)),
+            ?assertEqual(ocpp_message:id(Msg), ocpp_message:id(Message))
+    end.

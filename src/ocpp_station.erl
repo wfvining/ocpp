@@ -45,7 +45,8 @@
          connection = disconnected :: disconnected | {pid(), reference()},
          evse = #{} :: #{pos_integer() => ocpp_evse:evse()},
          pending = undefined :: undefined
-                              | {ocpp_message:messageid(), gen_statem:from()}}).
+                              | {ocpp_message:messageid(), gen_statem:from()},
+         pending_call = undefined :: undefined | timer:tref()}).
 
 -spec start_link(StationId :: binary(),
                  EVSE :: [ocpp_evse:evse()]) -> gen_statem:start_ret().
@@ -198,6 +199,9 @@ provisioning(cast, disconnect, Data) ->
 provisioning(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
+idle({call, From}, {call, Message}, Data) ->
+    {Reply, NewData} = call_station(Message, Data),
+    {keep_state, NewData, [{reply, From, Reply}]};
 idle({call, From}, {rpccall, _, _, Message}, Data) ->
     NewData = handle_rpccall(Message, From, Data),
     {next_state, idle, NewData};
@@ -263,6 +267,8 @@ cleanup_connection(#data{connection = {_, Ref}} = Data) ->
     erlang:demonitor(Ref),
     Data#data{connection = disconnected}.
 
+connection_pid(#data{connection = {Pid, Ref}}) -> Pid.
+
 handle_rpccall(Message, From, Data) ->
     ocpp_handler:rpc_request(Data#data.stationid, Message),
     Data#data{pending = {ocpp_message:id(Message), From}}.
@@ -318,3 +324,12 @@ boot_status_to_state(Message) ->
         <<"Rejected">> -> connected;
         <<"Pending">>  -> boot_pending
     end.
+
+call_station(Message, #data{pending_call = undefined} = Data) ->
+    ConnPid = connection_pid(Data),
+    ConnPid ! {ocpp, {call, Message}},
+    TRef = timer:send_after(30000, self(), {call_timeout, ocpp_message:id(Message)}),
+    NewData = Data#data{pending_call = TRef},
+    {ok, NewData};
+call_station(_Message, Data) ->
+    {{error, busy}, Data}.
