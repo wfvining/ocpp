@@ -18,7 +18,7 @@
 
 -export([start_link/2, stop/1,
          call/2, rpccall/2,
-         reply/2, %rpcreply/2,
+         reply/2, rpcreply/2,
          error/2, %rpcerror/2,
          connect/1]).
 
@@ -87,6 +87,14 @@ reply(StationId, Response) ->
           {error, Reason :: busy | offline}.
 call(Station, Request) ->
     gen_statem:call(?registry(Station), {call, Request}).
+
+%% @doc Notify the state machine that an RPCREPLY has arrived.
+-spec rpcreply(Station :: binary(), Reply :: ocpp_message:message()) ->
+          ok.
+rpcreply(Station, Response) ->
+    MessageType = ocpp_message:response_type(Response),
+    MessageId = ocpp_message:id(Response),
+    gen_statem:cast(?registry(Station), {rpcreply, MessageType, MessageId, Response}).
 
 %% @doc Reply to an RPC call with an error.
 -spec error(StationId :: binary(), Error :: ocpp_error:error()) -> ok.
@@ -253,6 +261,11 @@ code_change(_OldVsn, _NewVsn, Data) ->
 terminate(_Reason, _State, _Data) ->
     ok.
 
+handle_event(cast, {rpcreply, MsgType, MessageId, Message},
+             #data{pending_call = {TRef, MessageId}} = Data) ->
+    ocpp_handler:rpc_reply(Data#data.stationid, Message),
+    timer:cancel(TRef),
+    {keep_state, Data#data{pending_call = undefined}};
 handle_event(info, {'DOWN', Ref, process, Pid, _},
              #data{connection = {Pid, Ref}}) ->
     {keep_state_and_data, [{next_event, cast, disconnect}]}.
@@ -327,9 +340,10 @@ boot_status_to_state(Message) ->
 
 call_station(Message, #data{pending_call = undefined} = Data) ->
     ConnPid = connection_pid(Data),
-    ConnPid ! {ocpp, {call, Message}},
-    TRef = timer:send_after(30000, self(), {call_timeout, ocpp_message:id(Message)}),
-    NewData = Data#data{pending_call = TRef},
+    ConnPid ! {ocpp, {rpccall, Message}},
+    MessageId = ocpp_message:id(Message),
+    TRef = timer:send_after(30000, self(), {call_timeout, MessageId}),
+    NewData = Data#data{pending_call = {TRef, MessageId}},
     {ok, NewData};
 call_station(_Message, Data) ->
     {{error, busy}, Data}.

@@ -39,6 +39,14 @@
                 [#{"attributeValue" => <<"Foo">>,
                    "component" => #{"name" => <<"ComponentFoo">>},
                    "variable" => #{"name" => <<"VariableBar">>}}]})).
+-define(SET_VARIABLES_RESPONSE(MessageId),
+        ocpp_message:new_response(
+          'SetVariables',
+          #{"setVariableResult" =>
+                [#{"attributeStatus" => <<"Accepted">>,
+                   "component" => #{"name" => <<"ComponentFoo">>},
+                   "variable" => #{"name" => <<"VariableBar">>}}]},
+          MessageId)).
 
 all() ->
     [connect_station,
@@ -70,7 +78,9 @@ groups() ->
      {boot_pending_messages, [forbidden_messages, boot_request_pending]},
      {offline, [reconnect, restart]},
      {configuration, [{group, set_variables_error}, {group, set_variables}]},
-     {set_variables, [sequence], [set_variables_send_request, set_variables_receive_request]},
+     {set_variables, [sequence], [set_variables_send_request,
+                                  set_variables_receive_request,
+                                  set_variables_receive_response]},
      {set_variables_error, [set_variables_disconnected,
                             set_variables_rejected,
                             set_variables_offline]}].
@@ -93,39 +103,44 @@ end_per_suite(Config) ->
     [application:stop(App) || App <- ?config(apps, Config)],
     Config.
 
+forwarder(nil) ->
+    receive
+        stop -> ok;
+        {forward, Pid} -> forwarder(Pid)
+    end;
+forwarder(P) ->
+    receive
+        stop -> ok;
+        {forward, Pid} ->
+            forwarder(Pid);
+        M ->
+            P ! M,
+            forwarder(P)
+    end.
+
 init_per_group(start, Config) ->
     {ok, SuperSup} = ocpp_station_supersup:start_link(),
     unlink(SuperSup),
     [{supersup, SuperSup} | Config];
 init_per_group(set_variables, Config) ->
     StationId = ?stationid(set_variables),
+    P = spawn(fun() -> forwarder(nil) end),
     {ok, Sup} = ocpp_station_sup:start_link(
-                  StationId, [ocpp_evse:new(1)], {testing_handler, nil}),
+                  StationId, [ocpp_evse:new(1)], {testing_handler, P}),
     ConnPid = spawn(
                 fun () ->
                         ok = ocpp_station:connect(StationId),
                         {ok, _} = ocpp_station:rpccall(StationId, ?BOOT_ACCEPT),
                         {ok, _} = ocpp_station:rpccall(StationId, ?HEARTBEAT),
-                        L = fun Loop(P) ->
-                                    receive
-                                        stop ->
-                                            ok;
-                                        M ->
-                                            P ! M,
-                                            Loop(P)
-                                    end
-                            end,
-                        receive
-                            {forward, Pid} ->
-                                L(Pid)
-                        end
+                        forwarder(nil)
                 end),
     timer:sleep(100),
     unlink(Sup),
     [{message, ?SET_VARIABLES},
      {station_id, StationId},
      {station_sup, Sup},
-     {connpid, ConnPid} | Config];
+     {connpid, ConnPid},
+     {handlerpid, P}| Config];
 init_per_group(_, Config) ->
     Config.
 
@@ -134,6 +149,8 @@ end_per_group(set_variables, Config) ->
     gen_server:stop(StationSup),
     Conn = ?config(connpid, Config),
     Conn ! stop,
+    Handler = ?config(handlerpid, Config),
+    Handler ! stop,
     timer:sleep(10);
 end_per_group(start, Config) ->
     SuperSup = ?config(supersup, Config),
@@ -810,7 +827,22 @@ set_variables_receive_request(Config) ->
     Conn ! {forward, self()},
     Msg = ?config(message, Config),
     receive
-        {ocpp, {call, Message}} ->
+        {ocpp, {rpccall, Message}} ->
             ?assertEqual('SetVariables', ocpp_message:request_type(Message)),
             ?assertEqual(ocpp_message:id(Msg), ocpp_message:id(Message))
+    end.
+
+set_variables_receive_response() ->
+    [{doc, "The SetVariablesResponse is received by the station state machine"},
+     {timetrap, 2000}].
+set_variables_receive_response(Config) ->
+    H = ?config(handlerpid, Config),
+    Msg = ?config(message, Config),
+    H ! {forward, self()},
+    Reply = ?SET_VARIABLES_RESPONSE(ocpp_message:id(Msg)),
+    ocpp_station:rpcreply(?config(station_id, Config), Reply),
+    receive
+        Message ->
+            ?assertEqual(ocpp_message:id(Msg), ocpp_message:id(Message)),
+            ?assertEqual('SetVariables', ocpp_message:response_type(Message))
     end.

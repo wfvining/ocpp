@@ -25,7 +25,7 @@
          station_disconnected/1,
          station_ready/1]).
 %% OCPP events
--export([rpc_request/2]).
+-export([rpc_request/2, rpc_reply/2]).
 %% gen_event callbacks
 -export([init/1, handle_event/2, handle_call/2]).
 
@@ -38,6 +38,7 @@
                 stationid :: binary()}).
 
 -type request() :: ocpp_message:message().
+-type response() :: ocpp_message:message().
 
 %%% ========= OCPP Message-Related Types =========
 
@@ -63,6 +64,11 @@
 -callback init(InitArg :: any()) -> {ok, State :: any()} | {error, Reason :: any()}.
 %% Initialize any internal state the handler will need when responding
 %% to requests.
+
+-callback handle_call_response(Response :: response(),
+                               State :: any()) ->
+    {ok, NewState :: any()}.
+%% Handle a response to an RPCCALL made to the station.
 
 -callback handle_info(any(), State :: any()) -> {ok, NewState :: any()}.
 %% Handle events that are not OCPP messages.
@@ -110,6 +116,10 @@ add_handler(StationId, CallbackModule, InitArg, Reason) ->
 rpc_request(StationId, Request) ->
     gen_event:notify(?registry(StationId), {rpc_request, Request}).
 
+-spec rpc_reply(StationId :: binary(), Reply :: ocpp_message:message()) -> ok.
+rpc_reply(StationId, Reply) ->
+    gen_event:notify(?registry(StationId), {rpc_reply, Reply}).
+
 -spec station_connected(StationId :: binary()) -> ok.
 station_connected(StationId) ->
     gen_event:notify(?registry(StationId), station_connected).
@@ -145,6 +155,9 @@ handle_event({rpc_request, Message}, State) ->
     RequestFun = request_fun(ocpp_message:type(Message)),
     NewState = do_request(RequestFun, Message, State),
     {ok, NewState};
+handle_event({rpc_reply, Message}, #state{mod = Mod, handler_state = HState} = State) ->
+    {ok, NewHState} = Mod:handle_call_response(Message, HState),
+    {ok, State#state{handler_state = NewHState}};
 handle_event(Event, #state{mod = Mod, handler_state = HState} = State) ->
     try Mod:handle_info(Event, HState) of
         {ok, NewState} ->

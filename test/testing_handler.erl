@@ -2,12 +2,12 @@
 
 -behaviour(ocpp_handler).
 
--export([init/1, boot_notification/2]).
+-export([init/1, boot_notification/2, handle_call_response/2]).
 
 init({error, Reason}) ->
     error(Reason);
-init(_) ->
-    {ok, nil}.
+init(ForwardPid) ->
+    {ok, ForwardPid}.
 
 boot_notification(Notification, State) ->
     CustomData = ocpp_message:get(<<"customData">>, Notification),
@@ -30,6 +30,10 @@ boot_notification(Notification, State) ->
         <<"EXIT">> ->
             exit(ocpp_message:get(<<"errorReason">>, CustomData))
     end.
+
+handle_call_response(Msg, ForwardPid) ->
+    ForwardPid ! Msg,
+    {ok, ForwardPid}.
 
 make_response(Status, CustomData) ->
     #{'status' => Status,
