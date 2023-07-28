@@ -80,6 +80,10 @@ groups() ->
      {configuration, [{group, set_variables_error}, {group, set_variables}]},
      {set_variables, [sequence], [set_variables_send_request,
                                   set_variables_receive_request,
+                                  set_variables_receive_response,
+                                  set_variables_accept_station,
+                                  set_variables_send_request,
+                                  set_variables_receive_request,
                                   set_variables_receive_response]},
      {set_variables_error, [set_variables_disconnected,
                             set_variables_rejected,
@@ -123,15 +127,14 @@ init_per_group(start, Config) ->
     unlink(SuperSup),
     [{supersup, SuperSup} | Config];
 init_per_group(set_variables, Config) ->
-    StationId = ?stationid(set_variables),
     P = spawn(fun() -> forwarder(nil) end),
+    StationId = ?stationid(set_variables),
     {ok, Sup} = ocpp_station_sup:start_link(
                   StationId, [ocpp_evse:new(1)], {testing_handler, P}),
     ConnPid = spawn(
                 fun () ->
                         ok = ocpp_station:connect(StationId),
-                        {ok, _} = ocpp_station:rpccall(StationId, ?BOOT_ACCEPT),
-                        {ok, _} = ocpp_station:rpccall(StationId, ?HEARTBEAT),
+                        {ok, _} = ocpp_station:rpccall(StationId, ?BOOT_PENDING),
                         forwarder(nil)
                 end),
     timer:sleep(100),
@@ -830,7 +833,8 @@ set_variables_receive_request(Config) ->
         {ocpp, {rpccall, Message}} ->
             ?assertEqual('SetVariables', ocpp_message:request_type(Message)),
             ?assertEqual(ocpp_message:id(Msg), ocpp_message:id(Message))
-    end.
+    end,
+    Conn ! {forward, nil}.
 
 set_variables_receive_response() ->
     [{doc, "The SetVariablesResponse is received by the station state machine"},
@@ -845,4 +849,10 @@ set_variables_receive_response(Config) ->
         Message ->
             ?assertEqual(ocpp_message:id(Msg), ocpp_message:id(Message)),
             ?assertEqual('SetVariables', ocpp_message:response_type(Message))
-    end.
+    end,
+    H ! {forward, nil}.
+
+set_variables_accept_station(Config) ->
+    StationId = ?config(station_id, Config),
+    {ok, _} = ocpp_station:rpccall(StationId, ?BOOT_ACCEPT),
+    {ok, _} = ocpp_station:rpccall(StationId, ?HEARTBEAT).

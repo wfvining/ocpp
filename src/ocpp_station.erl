@@ -168,6 +168,14 @@ booting(cast, {error, Error},
 booting(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
+boot_pending({call, From}, {call, Message}, Data) ->
+    case ocpp_message:request_type(Message) of
+        'SetVariables' ->
+            {Reply, NewData} = call_station(Message, Data),
+            {keep_state, NewData, [{reply, From, Reply}]};
+        _ ->
+            {keep_state_and_data, [{reply, From, {error, illegal_request}}]}
+    end;
 boot_pending(cast, disconnect, Data) ->
     {next_state, disconnected, cleanup_connection(Data)};
 boot_pending({call, _From}, {rpccall, 'BootNotification', _, _}, Data) ->
