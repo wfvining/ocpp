@@ -84,7 +84,8 @@ groups() ->
                                   set_variables_accept_station,
                                   set_variables_send_request,
                                   set_variables_receive_request,
-                                  set_variables_receive_response]},
+                                  set_variables_receive_response,
+                                  set_variables_timeout]},
      {set_variables_error, [set_variables_disconnected,
                             set_variables_rejected,
                             set_variables_offline]}].
@@ -856,3 +857,25 @@ set_variables_accept_station(Config) ->
     StationId = ?config(station_id, Config),
     {ok, _} = ocpp_station:rpccall(StationId, ?BOOT_ACCEPT),
     {ok, _} = ocpp_station:rpccall(StationId, ?HEARTBEAT).
+
+set_variables_timeout(Config) ->
+    StationId = ?config(station_id, Config),
+    Msg = ?SET_VARIABLES,
+    H = ?config(handlerpid, Config),
+    H ! {forward, self()},
+    ok = ocpp_station:call(StationId, Msg, 10),
+    set_variables_receive_request([{message, Msg}|Config]),
+    timer:sleep(15),
+    Reply = ?SET_VARIABLES_RESPONSE(ocpp_message:id(Msg)),
+    ocpp_station:rpcreply(StationId, Reply),
+    receive
+        _Message ->
+            ct:fail("received unexpected message")
+    after 1000 ->
+            H ! {forward, nil},
+            ok
+    end,
+    NewMsg = ?SET_VARIABLES,
+    ok = ocpp_station:call(StationId, NewMsg),
+    set_variables_receive_request([{message, NewMsg}|Config]),
+    set_variables_receive_response([{message, NewMsg}|Config]).
