@@ -46,7 +46,7 @@
          evse = #{} :: #{pos_integer() => ocpp_evse:evse()},
          pending = undefined :: undefined
                               | {ocpp_message:messageid(), gen_statem:from()},
-         pending_call = undefined :: undefined | timer:tref()}).
+         pending_call = undefined :: undefined | {timer:tref(), ocpp_message:messageid()}}).
 
 -spec start_link(StationId :: binary(),
                  EVSE :: [ocpp_evse:evse()]) -> gen_statem:start_ret().
@@ -366,7 +366,7 @@ call_station(Message, #data{pending_call = undefined} = Data, Timeout) ->
     ConnPid = connection_pid(Data),
     ConnPid ! {ocpp, {rpccall, Message}},
     MessageId = ocpp_message:id(Message),
-    TRef = timer:send_after(Timeout, self(), {call_timeout, MessageId}),
+    {ok, TRef} = timer:send_after(Timeout, self(), {call_timeout, MessageId}),
     NewData = Data#data{pending_call = {TRef, MessageId}},
     {ok, NewData};
 call_station(_Message, Data, _) ->
