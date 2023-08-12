@@ -260,8 +260,6 @@ get([Key|Rest], #msgid{path = Path} = MsgId, IntermediatValue) ->
 -spec id(Message :: message()) -> messageid().
 id({Id, _}) -> Id.
 
-message_uri(MessageType) when is_list(MessageType) ->
-    message_uri(list_to_binary(MessageType));
 message_uri(MessageType) when is_binary(MessageType) ->
     <<?BASE_PATH, ":", MessageType/binary>>.
 
