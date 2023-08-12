@@ -74,6 +74,90 @@
                      | 'UnpublishFirmware'
                      | 'UpdateFirmware'.
 
+%%% ========= OCPP Message-Related Types =========
+
+-export_type([boot_request/0, set_variables_request/0]).
+-export_type([boot_response/0, set_variables_response/0]).
+
+-export_type([boot_status/0, status_info/0, boot_reason/0,
+              modem/0, charging_station/0]).
+
+-type custom_data() :: #{atom() | binary() => any()}.
+
+-type boot_status() :: 'Accepted' | 'Rejected' | 'Pending'.
+
+-type status_info() :: #{'reasonCode' := binary(), 'additionalInfo' => binary()}.
+
+-type boot_response() ::
+        #{'status' := boot_status(),
+          'interval' := non_neg_integer(),
+          'currentTime' := calendar:datetime(),
+          'statusInfo' => status_info()}.
+
+-type boot_reason() :: 'ApplicationReset'
+                     | 'FirmwareUpdate'
+                     | 'LocalReset'
+                     | 'PowerUp'
+                     | 'RemoteReset'
+                     | 'ScheduledReset'
+                     | 'Triggered'
+                     | 'Unknown'
+                     | 'Watchdog'.
+
+-type modem() :: #{'iccid' => binary(), 'imsi' => binary()}.
+
+-type charging_station() ::
+        #{'model' := binary(),
+          'vendorName' := binary(),
+          'firmwareVersion' => binary(),
+          'serialNumber' => binary(),
+          'modem' => modem()}.
+
+-type boot_request() ::
+        #{'reason' := boot_reason(),
+          'chargingStation' := charging_station(),
+          'customData' => custom_data()}.
+
+-type attribute_type() :: 'Actual' | 'Target' | 'MinSet' | 'MaxSet'.
+
+-type evse() :: #{'id' := pos_integer(), 'connectorId' => pos_integer()}.
+
+-type component() ::
+        #{'name' := binary(),
+          'instance' => binary(),
+          'evse' => evse()}.
+
+-type variable() :: #{'name' := binary(), 'instance' => binary()}.
+
+-type set_variable_data() ::
+        #{'attributeType' => attribute_type(),
+          'attributeValue' := binary(),
+          'component' := component(),
+          'variable' := variable()}.
+
+-type set_variables_request() ::
+        #{'setVariableData' := [set_variable_data()],
+          'customData' => custom_data}.
+
+-type set_variable_status() ::
+        'Accepted' |
+        'Rejected' |
+        'UnknownComponent' |
+        'UnknownVariable' |
+        'NotSupportedAttribute' |
+        'RebootRequired'.
+
+-type set_variable_result() ::
+        #{'attributeType' => attribute_type(),
+          'attributeStatus' := set_variable_status(),
+          'component' := component(),
+          'variable' := variable(),
+          'attributeStatusInfo' => status_info()}.
+
+-type set_variables_response() ::
+        #{'setVariableResult' := [set_variable_result()],
+          'customData' => custom_data()}.
+
 -type payload() :: jerk:jerkterm().
 -opaque message() :: {messageid(), payload()}.
 -type messageid() :: binary().
@@ -191,11 +275,15 @@ prepare_payload(Payload) when is_map(Payload) ->
 prepare_property({K, V}) ->
     {to_binary(K), prepare_value(V)}.
 
+to_binary(X) when is_atom(X) ->
+    atom_to_binary(X);
 to_binary(X) when is_list(X) ->
     list_to_binary(X);
 to_binary(X) ->
     X.
 
+prepare_value(V) when is_atom(V) ->
+    prepare_value(atom_to_binary(V));
 prepare_value(V) when is_map(V) ->
     prepare_payload(V);
 prepare_value(V) when is_list(V) ->

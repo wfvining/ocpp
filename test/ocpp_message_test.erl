@@ -100,3 +100,29 @@ type_test_() ->
               %% ?assertEqual(<<"CancelReservationRequest#/customData">>,
               %%              ocpp_message:type(Message))
      end}}.
+
+atom_keys_test_() ->
+    {"can construct a message from a map that uses atoms for keys.",
+     {setup,
+      fun load_schemas/0,
+      fun teardown_apps/1,
+      fun() ->
+              Message =
+                  ocpp_message:new_request('BootNotification',
+                                           #{reason => 'ApplicationReset',
+                                             chargingStation =>
+                                                 #{model => <<"foo">>,
+                                                   vendorName => <<"bar">>,
+                                                   modem => #{iccid => <<"testiccid">>}},
+                                             customData =>
+                                                 #{<<"foo">> => 1,
+                                                   bar => <<"abcdefg">>,
+                                                   vendorId => <<"vendor-foo">>}}),
+              ?assertEqual(<<"ApplicationReset">>, ocpp_message:get(<<"reason">>, Message)),
+              ?assertEqual(<<"testiccid">>,
+                           ocpp_message:get(
+                             <<"iccid">>,
+                             ocpp_message:get(
+                               <<"modem">>,
+                               ocpp_message:get(<<"chargingStation">>, Message))))
+      end}}.

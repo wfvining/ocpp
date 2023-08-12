@@ -29,7 +29,6 @@
 %% gen_event callbacks
 -export([init/1, handle_event/2, handle_call/2]).
 
--export_type([boot_status/0, boot_response/0, status_info/0]).
 -export_type([handler_error/0, handler_ret/1]).
 
 -record(state, {handler_state :: any(),
@@ -37,27 +36,15 @@
                 mod :: module(),
                 stationid :: binary()}).
 
--type request() :: ocpp_message:message().
--type response() :: ocpp_message:message().
-
-%%% ========= OCPP Message-Related Types =========
-
--type boot_status() :: 'Accepted' | 'Rejected' | 'Pending'.
-
--type status_info() :: #{'reasonCode' := binary(),
-                         'additionalInfo' => binary()}.
-
--type boot_response() :: #{'status' := boot_status(),
-                           'interval' := non_neg_integer(),
-                           'currentTime' := calendar:datetime(),
-                           'statusInfo' => status_info()}.
-
 -type handler_error() :: #{'ErrorCode' => binary(),
                            'ErrorDescription' => binary(),
                            'ErrorDetails' => #{binary() => any()}}.
 
 -type handler_ret(ResponseType) :: {reply, ResponseType, any()}
                                  | {error, handler_error(), any()}.
+
+-type request() :: ocpp_message:message().
+-type response() :: ocpp_message:message().
 
 %%% ========= Callback Definitions =========
 
@@ -74,7 +61,7 @@
 %% Handle events that are not OCPP messages.
 
 -callback boot_notification(Req :: request(), State :: any()) ->
-    handler_ret(boot_response()).
+    handler_ret(ocpp_message:boot_response()).
 %% Handle a BootNotificationRequest.
 
 -optional_callbacks([boot_notification/2, handle_info/2]).
