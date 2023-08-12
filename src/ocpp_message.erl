@@ -244,6 +244,9 @@ join([Bin|Binaries], Delimiter) ->
               <<Acc/binary, Delimiter/binary, X/binary>>
       end, <<Bin/binary>>, Binaries).
 
+get([], #msgid{path = Path} = MessageId, Value) when is_list(Value) ->
+    [get([], MessageId#msgid{path = Path ++ [<<"$array-element">>]}, X)
+     || X <- Value];
 get([], MessageId, Value) ->
     case jerk:is_object(Value) of
         true ->
@@ -297,7 +300,6 @@ prepare_value(V) ->
 prepare_array([]) -> [];
 prepare_array([H|T]) when is_map(H) -> [prepare_payload(H) | prepare_array(T)];
 prepare_array([H|T]) -> [H | prepare_array(T)].
-
 
 is_property_list([]) -> false;
 is_property_list(List) ->
