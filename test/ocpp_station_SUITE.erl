@@ -77,15 +77,18 @@ groups() ->
                             {group, boot_pending_messages}]},
      {boot_pending_messages, [forbidden_messages, boot_request_pending]},
      {offline, [reconnect, restart]},
-     {configuration, [{group, set_variables_error}, {group, set_variables}]},
-     {set_variables, [sequence], [set_variables_send_request,
-                                  set_variables_receive_request,
-                                  set_variables_receive_response,
-                                  set_variables_accept_station,
-                                  set_variables_send_request,
-                                  set_variables_receive_request,
-                                  set_variables_receive_response,
-                                  set_variables_timeout]},
+     {configuration, [{group, set_variables_error},
+                      {group, set_variables_async},
+                      {group, set_variables_sync}]},
+     {set_variables_async, [sequence], [set_variables_send_request,
+                                        set_variables_receive_request,
+                                        set_variables_receive_response,
+                                        set_variables_accept_station,
+                                        set_variables_send_request,
+                                        set_variables_receive_request,
+                                        set_variables_receive_response,
+                                        set_variables_timeout]},
+     {set_variables_sync, [set_variables_sync]},
      {set_variables_error, [set_variables_disconnected,
                             set_variables_rejected,
                             set_variables_offline]}].
@@ -127,7 +130,7 @@ init_per_group(start, Config) ->
     {ok, SuperSup} = ocpp_station_supersup:start_link(),
     unlink(SuperSup),
     [{supersup, SuperSup} | Config];
-init_per_group(set_variables, Config) ->
+init_per_group(set_variables_async, Config) ->
     P = spawn(fun() -> forwarder(nil) end),
     StationId = ?stationid(set_variables),
     {ok, Sup} = ocpp_station_sup:start_link(
@@ -253,6 +256,13 @@ init_per_testcase(set_variables_rejected = Case, Config0) ->
     ok = ocpp_station:connect(StationId),
     {ok, Response} = ocpp_station:rpccall(StationId, ?BOOT_REJECT),
     ?assertEqual(<<"Rejected">>, ocpp_message:get(<<"status">>, Response)),
+    Config;
+init_per_testcase(set_variables_sync = Case, Config0) ->
+    StationId = ?stationid(Case),
+    Config = start_station(StationId, Config0),
+    ok = ocpp_station:connect(StationId),
+    {ok, _} = ocpp_station:rpccall(StationId, ?BOOT_ACCEPT),
+    {ok, _} = ocpp_station:rpccall(StationId, ?HEARTBEAT),
     Config;
 init_per_testcase(Case, Config) ->
     StationId = ?stationid(Case),
@@ -790,7 +800,7 @@ set_variables_disconnected() ->
 set_variables_disconnected(Config) ->
     StationId = ?config(stationid, Config),
     Request = ?SET_VARIABLES,
-    {error, not_connected} = ocpp_station:call(StationId, Request).
+    {error, not_connected} = ocpp_station:call_async(StationId, Request).
 
 set_variables_offline() ->
     [{doc, "Attempt to send a SetVariables request when the station is offline "
@@ -801,11 +811,11 @@ set_variables_offline(Config) ->
     ConnPid = ?config(connpid, Config),
     exit(ConnPid, abnormal),
     timer:sleep(5),
-    {error, offline} = ocpp_station:call(StationId, ?SET_VARIABLES),
+    {error, offline} = ocpp_station:call_async(StationId, ?SET_VARIABLES),
     ok = ocpp_station:connect(StationId),
     %% Still offline because we don't know if the station rebooted or
     %% just lost its connection.
-    {error, offline} = ocpp_station:call(StationId, ?SET_VARIABLES).
+    {error, offline} = ocpp_station:call_async(StationId, ?SET_VARIABLES).
 
 set_variables_rejected() ->
     [{doc, "Attempt to send a SetVariables request after rejecting "
@@ -813,7 +823,7 @@ set_variables_rejected() ->
      {timetrap, 1000}].
 set_variables_rejected(Config) ->
     StationId = ?config(stationid, Config),
-    {error, not_accepted} = ocpp_station:call(StationId, ?SET_VARIABLES).
+    {error, not_accepted} = ocpp_station:call_async(StationId, ?SET_VARIABLES).
 
 set_variables_send_request() ->
     [{doc, "A SetVariablesRequest can be sent to the station"},
@@ -821,7 +831,7 @@ set_variables_send_request() ->
 set_variables_send_request(Config) ->
     StationId = ?config(station_id, Config),
     Msg = ?config(message, Config),
-    ok = ocpp_station:call(StationId, Msg).
+    ok = ocpp_station:call_async(StationId, Msg).
 
 set_variables_receive_request() ->
     [{doc, "The SetVariablseRequest is received by the connected process"},
@@ -863,7 +873,7 @@ set_variables_timeout(Config) ->
     Msg = ?SET_VARIABLES,
     H = ?config(handlerpid, Config),
     H ! {forward, self()},
-    ok = ocpp_station:call(StationId, Msg, 10),
+    ok = ocpp_station:call_async(StationId, Msg, 10),
     set_variables_receive_request([{message, Msg}|Config]),
     timer:sleep(15),
     Reply = ?SET_VARIABLES_RESPONSE(ocpp_message:id(Msg)),
@@ -876,6 +886,20 @@ set_variables_timeout(Config) ->
             ok
     end,
     NewMsg = ?SET_VARIABLES,
-    ok = ocpp_station:call(StationId, NewMsg),
+    ok = ocpp_station:call_async(StationId, NewMsg),
     set_variables_receive_request([{message, NewMsg}|Config]),
     set_variables_receive_response([{message, NewMsg}|Config]).
+
+set_variables_sync() ->
+    [{doc, "Make a synchronous SetVariablesRequest call to the station."},
+     {timetrap, 5000}].
+set_variables_sync(Config) ->
+    StationId = ?config(stationid, Config),
+    Msg = ?SET_VARIABLES,
+    ResponseMsg = ?SET_VARIABLES_RESPONSE(ocpp_message:id(Msg)),
+    timer:apply_after(100, ocpp_station, rpcreply, [StationId, ResponseMsg]),
+    {ok, Response} = ocpp_station:call(StationId, Msg, 2000),
+    ?assertEqual(ocpp_message:id(Msg), ocpp_message:id(Response)),
+    [Result] = ocpp_message:get(<<"setVariableResult">>, Response),
+    ct:log("Result = ~p~n", [Result]),
+    ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"attributeStatus">>, Result)).
