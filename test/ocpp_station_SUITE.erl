@@ -88,7 +88,7 @@ groups() ->
                                         set_variables_receive_request,
                                         set_variables_receive_response,
                                         set_variables_timeout]},
-     {set_variables_sync, [set_variables_sync]},
+     {set_variables_sync, [set_variables_sync, set_variables_sync_timeout]},
      {set_variables_error, [set_variables_disconnected,
                             set_variables_rejected,
                             set_variables_offline]}].
@@ -257,7 +257,9 @@ init_per_testcase(set_variables_rejected = Case, Config0) ->
     {ok, Response} = ocpp_station:rpccall(StationId, ?BOOT_REJECT),
     ?assertEqual(<<"Rejected">>, ocpp_message:get(<<"status">>, Response)),
     Config;
-init_per_testcase(set_variables_sync = Case, Config0) ->
+init_per_testcase(Case, Config0)
+  when Case =:= set_variables_sync;
+       Case =:= set_variables_sync_timeout ->
     StationId = ?stationid(Case),
     Config = start_station(StationId, Config0),
     ok = ocpp_station:connect(StationId),
@@ -903,3 +905,11 @@ set_variables_sync(Config) ->
     [Result] = ocpp_message:get(<<"setVariableResult">>, Response),
     ct:log("Result = ~p~n", [Result]),
     ?assertEqual(<<"Accepted">>, ocpp_message:get(<<"attributeStatus">>, Result)).
+
+set_variables_sync_timeout() ->
+    [{doc, "An ocpp timeout message should be received before a timeout error"},
+     {timetrap, 10000}].
+set_variables_sync_timeout(Config) ->
+    StationId = ?config(stationid, Config),
+    Msg = ?SET_VARIABLES,
+    {error, timeout} = ocpp_station:call(StationId, Msg, 10).

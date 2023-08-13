@@ -320,6 +320,11 @@ handle_event(cast, {rpcreply, _MsgType, MessageId, Message},
 handle_event(cast, {rpcreply, _, _, _}, _) ->
     keep_state_and_data;
 handle_event(info, {call_timeout, MessageId},
+             #data{pending_call = {_TRef, MessageId},
+                   reply_to = {MessageId, From}} = Data) ->
+    {keep_state, Data#data{pending_call = undefined, reply_to = undefined},
+     [{reply, From, {error, timeout}}]};
+handle_event(info, {call_timeout, MessageId},
              #data{pending_call = {_TRef, MessageId}} = Data) ->
     {keep_state, Data#data{pending_call = undefined}};
 handle_event(info, {call_timeout, _}, _) ->
