@@ -198,11 +198,15 @@ booting(cast, {error, Error},
 booting(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
-boot_pending({call, From}, {send_request, Message, Timeout}, Data) ->
+boot_pending({call, From}, {Call, Message, Timeout}, Data) ->
     case ocpp_message:request_type(Message) of
         'SetVariables' ->
             {Reply, NewData} = call_station(Message, Data, Timeout),
-            {keep_state, NewData, [{reply, From, Reply}]};
+            if Call =:= send_request ->
+                    {keep_state, NewData, [{reply, From, Reply}]};
+               Call =:= call ->
+                    {keep_state, NewData#data{reply_to = {ocpp_message:id(Message), From}}}
+            end;
         _ ->
             {keep_state_and_data, [{reply, From, {error, illegal_request}}]}
     end;

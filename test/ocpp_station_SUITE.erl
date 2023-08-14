@@ -88,7 +88,9 @@ groups() ->
                                         set_variables_receive_request,
                                         set_variables_receive_response,
                                         set_variables_timeout]},
-     {set_variables_sync, [set_variables_sync, set_variables_sync_timeout]},
+     {set_variables_sync, [set_variables_sync,
+                           set_variables_sync_timeout,
+                           set_variables_sync_pending]},
      {set_variables_error, [set_variables_disconnected,
                             set_variables_rejected,
                             set_variables_offline]}].
@@ -256,6 +258,12 @@ init_per_testcase(set_variables_rejected = Case, Config0) ->
     ok = ocpp_station:connect(StationId),
     {ok, Response} = ocpp_station:rpccall(StationId, ?BOOT_REJECT),
     ?assertEqual(<<"Rejected">>, ocpp_message:get(<<"status">>, Response)),
+    Config;
+init_per_testcase(set_variables_sync_pending = Case, Config0) ->
+    StationId = ?stationid(Case),
+    Config = start_station(StationId, Config0),
+    ok = ocpp_station:connect(StationId),
+    {ok, _} = ocpp_station:rpccall(StationId, ?BOOT_PENDING),
     Config;
 init_per_testcase(Case, Config0)
   when Case =:= set_variables_sync;
@@ -913,3 +921,13 @@ set_variables_sync_timeout(Config) ->
     StationId = ?config(stationid, Config),
     Msg = ?SET_VARIABLES,
     {error, timeout} = ocpp_station:call(StationId, Msg, 10).
+
+set_variables_sync_pending() ->
+    [{doc, "Can make a synchronous SetVariables call to the station in the pending state"},
+     {timetrap, 5000}].
+set_variables_sync_pending(Config) ->
+    StationId = ?config(stationid, Config),
+    Msg = ?SET_VARIABLES,
+    Response = ?SET_VARIABLES_RESPONSE(ocpp_message:id(Msg)),
+    timer:apply_after(100, ocpp_station, rpcreply, [StationId, Response]),
+    {ok, Response} = ocpp_station:call(StationId, Msg, 2000).
