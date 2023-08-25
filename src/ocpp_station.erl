@@ -337,66 +337,7 @@ handle_event(info, {'DOWN', Ref, process, Pid, _},
              #data{connection = {Pid, Ref}}) ->
     {keep_state_and_data, [{next_event, cast, disconnect}]}.
 
-setup_connection(Data, ConnectionPid) ->
-    Ref = monitor(process, ConnectionPid),
-    ocpp_handler:station_connected(Data#data.stationid),
-    Data#data{connection = {ConnectionPid, Ref}}.
-
-cleanup_connection(#data{connection = {_, Ref}} = Data) ->
-    ocpp_handler:station_disconnected(Data#data.stationid),
-    erlang:demonitor(Ref),
-    Data#data{connection = disconnected}.
-
-connection_pid(#data{connection = {Pid, Ref}}) -> Pid.
-
-handle_rpccall(Message, From, Data) ->
-    ocpp_handler:rpc_request(Data#data.stationid, Message),
-    Data#data{pending = {ocpp_message:id(Message), From}}.
-
-clear_pending_request(Data) ->
-    Data#data{pending = undefined}.
-
-update_status(Message, Data) ->
-    _Time = ocpp_message:get(<<"timestamp">>, Message),
-    Status = ocpp_message:get(<<"connectorStatus">>, Message),
-    EVSEId = ocpp_message:get(<<"evseId">>, Message),
-    ConnectorId = ocpp_message:get(<<"connectorId">>, Message),
-    case update_connector_status(Data#data.evse, EVSEId, ConnectorId, Status)
-    of
-        {ok, NewEVSE} ->
-            {ok, Data#data{evse = NewEVSE}};
-        {error, _Reason} ->
-            {error, Data}
-    end.
-
-update_connector_status(EVSE, EVSEId, ConnectorId, Status) ->
-    try
-        NewEVSE =
-            maps:update_with(
-              EVSEId,
-              fun (EVSEInfo) ->
-                      ocpp_evse:set_status(EVSEInfo, ConnectorId, Status)
-              end,
-              EVSE),
-        {ok, NewEVSE}
-    catch error:badconnector ->
-            {error, badconnector};
-          error:{badkey, _} ->
-            {error, badevse}
-    end.
-
-heartbeat_response(MessageId) ->
-    ocpp_message:new_response(
-      'Heartbeat',
-      #{"currentTime" =>
-            list_to_binary(
-              calendar:system_time_to_rfc3339(
-                erlang:system_time(second),
-                [{offset, "Z"}, {unit, second}]))},
-     MessageId).
-
-init_evse(EVSE) ->
-    maps:from_list(lists:zip(lists:seq(1, length(EVSE)), EVSE)).
+%%%%%% Internal functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 boot_status_to_state(Message) ->
     case ocpp_message:get(<<"status">>, Message) of
@@ -414,3 +355,64 @@ call_station(Message, #data{pending_call = undefined} = Data, Timeout) ->
     {ok, NewData};
 call_station(_Message, Data, _) ->
     {{error, busy}, Data}.
+
+cleanup_connection(#data{connection = {_, Ref}} = Data) ->
+    ocpp_handler:station_disconnected(Data#data.stationid),
+    erlang:demonitor(Ref),
+    Data#data{connection = disconnected}.
+
+clear_pending_request(Data) ->
+    Data#data{pending = undefined}.
+
+connection_pid(#data{connection = {Pid, _Ref}}) -> Pid.
+
+heartbeat_response(MessageId) ->
+    ocpp_message:new_response(
+      'Heartbeat',
+      #{"currentTime" =>
+            list_to_binary(
+              calendar:system_time_to_rfc3339(
+                erlang:system_time(second),
+                [{offset, "Z"}, {unit, second}]))},
+     MessageId).
+
+handle_rpccall(Message, From, Data) ->
+    ocpp_handler:rpc_request(Data#data.stationid, Message),
+    Data#data{pending = {ocpp_message:id(Message), From}}.
+
+init_evse(EVSE) ->
+    maps:from_list(lists:zip(lists:seq(1, length(EVSE)), EVSE)).
+
+setup_connection(Data, ConnectionPid) ->
+    Ref = monitor(process, ConnectionPid),
+    ocpp_handler:station_connected(Data#data.stationid),
+    Data#data{connection = {ConnectionPid, Ref}}.
+
+update_connector_status(EVSE, EVSEId, ConnectorId, Status) ->
+    try
+        NewEVSE =
+            maps:update_with(
+              EVSEId,
+              fun (EVSEInfo) ->
+                      ocpp_evse:set_status(EVSEInfo, ConnectorId, Status)
+              end,
+              EVSE),
+        {ok, NewEVSE}
+    catch error:badconnector ->
+            {error, badconnector};
+          error:{badkey, _} ->
+            {error, badevse}
+    end.
+
+update_status(Message, Data) ->
+    _Time = ocpp_message:get(<<"timestamp">>, Message),
+    Status = ocpp_message:get(<<"connectorStatus">>, Message),
+    EVSEId = ocpp_message:get(<<"evseId">>, Message),
+    ConnectorId = ocpp_message:get(<<"connectorId">>, Message),
+    case update_connector_status(Data#data.evse, EVSEId, ConnectorId, Status)
+    of
+        {ok, NewEVSE} ->
+            {ok, Data#data{evse = NewEVSE}};
+        {error, _Reason} ->
+            {error, Data}
+    end.
