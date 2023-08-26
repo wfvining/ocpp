@@ -30,6 +30,39 @@ create_message_test_() ->
       , construct_with_error()
       ]}}.
 
+get_default_test_() ->
+    {"Can provide a default to `get/3' which will be returned if the "
+     "requested key is not present.",
+     {setup, fun load_schemas/0, fun teardown_apps/1,
+      {inparallel,
+       [?_test(
+           ?assertEqual(nil,
+                        ocpp_message:get(
+                          <<"foo">>,
+                          ocpp_message:new_request(
+                            'CancelReservation', #{<<"reservationId">> => 123}),
+                          nil))),
+        ?_test(
+           ?assertEqual(nil,
+                        ocpp_message:get(
+                          <<"foo/bar">>,
+                          ocpp_message:new_request(
+                            'CancelReservation', #{<<"reservationId">> => 123}),
+                          nil))),
+        ?_test(
+           ?assertError(_,
+                        ocpp_message:get(
+                          <<"reservationId/foo">>,
+                          ocpp_message:new_request(
+                            'CancelReservation', #{<<"reservationId">> => 123}),
+                          nil))),
+        ?_test(
+           ?assertError({undefined, _},
+                        ocpp_message:get(
+                          <<"foo">>,
+                          ocpp_message:new_request(
+                            'CancelReservation', #{<<"reservationId">> => 123}))))]}}}.
+
 get_nested_test_() ->
     {"Can separate a nested object from its message but still use the"
      "ocpp_message API to access its fields.",

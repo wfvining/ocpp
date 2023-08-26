@@ -217,12 +217,11 @@ type({_MessageId, Message}) ->
 
 -spec get(Key :: binary(), Message :: message()) -> jerk:primterm() | jerk:jerkterm().
 get(Key, {MessageId, Message}) ->
-    case get(string:split(Key, "/", all), decompose_msgid(MessageId), Message) of
-        {SubId, Value} ->
-            {SubId, Value};
-        Value ->
-            Value
-    end.
+    get(string:split(Key, "/", all), decompose_msgid(MessageId), Message, []).
+
+-spec get(Key :: binary(), Message :: message(), Default) -> jerk:primterm() | jerk:jerkterm() | Default.
+get(Key, {MessageId, Message}, Default) ->
+    get(string:split(Key, "/", all), decompose_msgid(MessageId), Message, [{default, Default}]).
 
 decompose_msgid(MessageId) ->
     case binary:split(MessageId, <<"#/">>) of
@@ -244,20 +243,30 @@ join([Bin|Binaries], Delimiter) ->
               <<Acc/binary, Delimiter/binary, X/binary>>
       end, <<Bin/binary>>, Binaries).
 
-get([], #msgid{path = Path} = MessageId, Value) when is_list(Value) ->
-    [get([], MessageId#msgid{path = Path ++ [<<"$array-element">>]}, X)
+get([], #msgid{path = Path} = MessageId, Value, Options) when is_list(Value) ->
+    [get([], MessageId#msgid{path = Path ++ [<<"$array-element">>]}, X, Options)
      || X <- Value];
-get([], MessageId, Value) ->
+get([], MessageId, Value, _) ->
     case jerk:is_object(Value) of
         true ->
             {recompose_msgid(MessageId), Value};
         false ->
             Value
     end;
-get([Key|Rest], #msgid{path = Path} = MsgId, IntermediatValue) ->
-    get(Rest,
-        MsgId#msgid{path = Path ++ [Key]},
-        jerk:get_value(IntermediatValue, Key)).
+get([Key|Rest], #msgid{path = Path} = MsgId, IntermediatValue, Options) ->
+    try
+        get(Rest,
+            MsgId#msgid{path = Path ++ [Key]},
+            jerk:get_value(IntermediatValue, Key),
+            Options)
+    catch error:{undefined, _} = E ->
+            HasDefault = lists:member(default, proplists:get_keys(Options)),
+            if HasDefault ->
+                    proplists:get_value(default, Options);
+               not HasDefault ->
+                    error(E)
+            end
+    end.
 
 %% @doc Return the message ID.
 -spec id(Message :: message()) -> messageid().
