@@ -7,7 +7,7 @@
 
 -behaviour(supervisor).
 
--export([start_link/0, start_station/3]).
+-export([start_link/0, start_station/2]).
 -export([init/1]).
 
 -define(SERVER, ?MODULE).
@@ -25,21 +25,20 @@ init([]) ->
                        restart => transient}]}}.
 
 -spec start_station(StationId :: binary(),
-                    EVSE :: [ocpp_evse:evse()],
-                    CSMSHandler :: {Module :: module(), InitArg :: any()}) ->
+                    EVSE :: [ocpp_evse:evse()]) ->
           {ok, pid()} |
           {error, {already_started, pid()}}.
-start_station(StationId, NumEVSE, CSMSHandler) ->
+start_station(StationId, NumEVSE) ->
     case ocpp_station_manager:whereis(StationId) of
         undefined ->
-            do_start_station(StationId, NumEVSE, CSMSHandler);
+            do_start_station(StationId, NumEVSE);
         Pid when is_pid(Pid) ->
             {error, {already_started, Pid}}
     end.
 
-do_start_station(StationId, NumEVSE, CSMSHandler) ->
+do_start_station(StationId, NumEVSE) ->
     case supervisor:start_child(
-           ?SERVER, [StationId, NumEVSE, CSMSHandler])
+           ?SERVER, [StationId, NumEVSE])
     of
         {ok, _} = Ok -> Ok;
         {error, {shutdown, {failed_to_start_child, _, Err}}} ->

@@ -7,17 +7,16 @@
 
 -behaviour(supervisor).
 
--export([start_link/3, stop/1]).
+-export([start_link/2, stop/1]).
 -export([init/1]).
 
 -spec start_link(StationId :: binary(),
-                 EVSE :: [ocpp_evse:evse()],
-                 CSMSHandler :: {module(), any()}) ->
+                 EVSE :: [ocpp_evse:evse()]) ->
           supervisor:startlink_ret().
-start_link(StationId, EVSE, CSMSHandler) ->
-    supervisor:start_link(?MODULE, {StationId, EVSE, CSMSHandler}).
+start_link(StationId, EVSE) ->
+    supervisor:start_link(?MODULE, {StationId, EVSE}).
 
-init({StationId, EVSE, CSMSHandler}) ->
+init({StationId, EVSE}) ->
     SupFlags = #{strategy => rest_for_one,
                  intensity => 4,
                  period => 3600},
@@ -31,7 +30,7 @@ init({StationId, EVSE, CSMSHandler}) ->
            modules => dynamic},
           #{id => station_manager,
            start => {ocpp_station_manager, start_link,
-                     [StationId, CSMSHandler]},
+                     [StationId]},
            type => worker,
            restart => permanent,
            shutdown => 1000,
