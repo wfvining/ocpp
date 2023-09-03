@@ -18,7 +18,6 @@
 
 -export([start_link/2, stop/1,
          call/2, call/3, rpccall/2,
-         call_async/2, call_async/3,
          reply/2, rpcreply/2,
          error/2, %rpcerror/2,
          connect/1]).
@@ -45,9 +44,7 @@
         {stationid :: binary(),
          connection = disconnected :: disconnected | {pid(), reference()},
          evse = #{} :: #{pos_integer() => ocpp_evse:evse()},
-         pending = undefined :: undefined
-                              | {ocpp_message:messageid(), gen_statem:from()},
-         reply_to = undefined :: undefined | {ocpp_message:messageid(), gen_statem:from()},
+         pending = undefined :: undefined | {ocpp_message:messageid(), gen_statem:from()},
          pending_call = undefined :: undefined | {timer:tref(), ocpp_message:messageid()}}).
 
 -spec start_link(StationId :: binary(),
@@ -72,7 +69,7 @@ connect(Station) ->
 rpccall(Station, Request) ->
     MessageType = ocpp_message:request_type(Request),
     MessageId = ocpp_message:id(Request),
-    gen_statem:call(?registry(Station), {rpccall, MessageType, MessageId, Request}).
+    gen_statem:cast(?registry(Station), {rpccall, MessageType, MessageId, Request}).
 
 %% @doc Reply to an RPC call with a normal response.
 -spec reply(StationId :: binary(), Response :: ocpp_message:message()) ->
@@ -80,26 +77,12 @@ rpccall(Station, Request) ->
 reply(StationId, Response) ->
     gen_statem:cast(?registry(StationId), {reply, Response}).
 
-%% @equiv call(Station, Request, 30000)
--spec call(Station :: binary(), Request :: ocpp_message:message()) ->
-          {ok, Response :: ocpp_message:message()} |
-          {error, ocpp_error:error() | busy | offline}.
-call(Station, Request) ->
-    call(Station, Request, 30000).
-
--spec call(Station :: binary(), Request :: ocpp_message:message(),
-           Timeout :: pos_integer()) ->
-          {ok, Response :: ocpp_message:message()} |
-          {error, ocpp_error:error() | busy | offline}.
-call(Station, Request, Timeout) ->
-    gen_statem:call(?registry(Station), {call, Request, Timeout}, Timeout + 5000).
-
 %% @equiv call_async(Station, Request, 30000)
--spec call_async(Station :: binary(), Request :: ocpp_message:message()) ->
+-spec call(Station :: binary(), Request :: ocpp_message:message()) ->
           ok |
           {error, Reason :: busy | offline}.
-call_async(Station, Request) ->
-    call_async(Station, Request, 30000).
+call(Station, Request) ->
+    call(Station, Request, 30000).
 
 %% @doc Send an RPCCALL message to the station. If there is an
 %% outstanding request that has already been sent to the station this
@@ -107,15 +90,15 @@ call_async(Station, Request) ->
 %% `{error, offline}' will be returned. The call will time out after
 %% `Timeout' milliseconds.
 %%
-%% This is the asynchronous version of `call/3'. The calling process
-%% returns immediately and the call response will be forwareded to the
-%% station's handler process when it is received.
-%% @end
--spec call_async(Station :: binary(), Request :: ocpp_message:message(),
+%% The calling process returns immediately. When an RPCREPLY is
+%% received, or a timeout occurs the caller will be notified via an
+%% ocpp_handler event.
+-spec call(Station :: binary(),
+           Request :: ocpp_message:message(),
            Timeout :: pos_integer()) ->
           ok |
           {error, Reason :: busy | offline}.
-call_async(Station, Request, Timeout) ->
+call(Station, Request, Timeout) ->
     gen_statem:call(?registry(Station), {send_request, Request, Timeout}).
 
 %% @doc Notify the state machine that an RPCREPLY has arrived.
@@ -153,12 +136,13 @@ connected({call, From}, {connect, _}, _Data) ->
     {keep_state_and_data, [{reply, From, {error, already_connected}}]};
 connected(cast, disconnect, Data) ->
     {next_state, disconnected, cleanup_connection(Data)};
-connected({call, From}, {rpccall, 'BootNotification', _, Message}, Data) ->
-    NewData = handle_rpccall(Message, From , Data),
+connected(cast, {rpccall, 'BootNotification', _, Message}, Data) ->
+    NewData = handle_rpccall(Message, Data),
     {next_state, booting, NewData};
-connected({call, From}, {rpccall, _, MessageId, _}, _Data) ->
+connected(cast, {rpccall, _, MessageId, _}, Data) ->
     Error = ocpp_error:new('SecurityError', MessageId),
-    {keep_state_and_data, [{reply, From, {error, Error}}]};
+    ok = send_error(Error, Data),
+    keep_state_and_data;
 connected({call, From}, {send_request, _, _}, _Data) ->
     {keep_state_and_data, [{reply, From, {error, not_accepted}}]};
 connected(EventType, Event, Data) ->
@@ -167,12 +151,13 @@ connected(EventType, Event, Data) ->
 booting(cast, disconnect, Data) ->
     {next_state, disconnected, cleanup_connection(Data)};
 booting(cast, {reply, Response},
-        #data{pending = {MessageId, From}} = Data) ->
+        #data{pending = MessageId} = Data) ->
     ResponseId = ocpp_message:id(Response),
     if
         MessageId =:= ResponseId ->
             NextState = boot_status_to_state(Response),
-            {next_state, NextState, clear_pending_request(Data), [{reply, From, {ok, Response}}]};
+            send_response(Response, Data),
+            {next_state, NextState, clear_pending_request(Data)};
         MessageId =/= ResponseId ->
             logger:notice(
               "Received out of order response to message ~p "
@@ -181,12 +166,12 @@ booting(cast, {reply, Response},
               [ResponseId, MessageId]),
             keep_state_and_data
     end;
-booting(cast, {error, Error},
-        #data{pending = {MessageId, From}} = Data) ->
+booting(cast, {error, Error}, #data{pending = MessageId} = Data) ->
     ResponseId = ocpp_error:id(Error),
     if
         MessageId =:= ResponseId ->
-            {next_state, connected, clear_pending_request(Data), [{reply, From, {error, Error}}]};
+            ok = send_error(Error, Data),
+            {next_state, connected, clear_pending_request(Data)};
         MessageId =/= ResponseId ->
             logger:notice(
               "Received out of order error for message ~p "
@@ -198,23 +183,19 @@ booting(cast, {error, Error},
 booting(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
-boot_pending({call, From}, {Call, Message, Timeout}, Data) ->
+boot_pending({call, From}, {send_request, Message, Timeout}, Data) ->
     case ocpp_message:request_type(Message) of
         'SetVariables' ->
             {Reply, NewData} = call_station(Message, Data, Timeout),
-            if Call =:= send_request ->
-                    {keep_state, NewData, [{reply, From, Reply}]};
-               Call =:= call ->
-                    {keep_state, NewData#data{reply_to = {ocpp_message:id(Message), From}}}
-            end;
+            {keep_state, NewData, [{reply, From, Reply}]};
         _ ->
             {keep_state_and_data, [{reply, From, {error, illegal_request}}]}
     end;
 boot_pending(cast, disconnect, Data) ->
     {next_state, disconnected, cleanup_connection(Data)};
-boot_pending({call, _From}, {rpccall, 'BootNotification', _, _}, Data) ->
+boot_pending(cast, {rpccall, 'BootNotification', _, _}, Data) ->
     {next_state, connected, Data, [postpone]};
-boot_pending({call, From}, {rpccall, _, _, Message}, _Data) ->
+boot_pending(cast, {rpccall, _, _, Message}, Data) ->
     Error =
         ocpp_error:new(
           'SecurityError',
@@ -223,25 +204,28 @@ boot_pending({call, From}, {rpccall, _, _, Message}, _Data) ->
             <<"The charging station is not allowed to initiate "
               "sending any messages other than a BootNotificationRequest "
               "before being accepted.">>}]),
+    ok = send_error(Error, Data),
     %% XXX It is not clear whether this is the correct next state.
-    {keep_state_and_data, [{reply, From, {error, Error}}]};
+    keep_state_and_data;
 boot_pending(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
-provisioning({call, From}, {rpccall, 'Heartbeat', MessageId, _}, Data) ->
-    {next_state, idle, Data, [{reply, From, {ok, heartbeat_response(MessageId)}}]};
-provisioning({call, From}, {rpccall, 'StatusNotification', MessageId, Message}, Data) ->
+provisioning(cast, {rpccall, 'Heartbeat', MessageId, _}, Data) ->
+    send_response(heartbeat_response(MessageId), Data),
+    {next_state, idle, Data};
+provisioning(cast, {rpccall, 'StatusNotification', MessageId, Message}, Data) ->
     case update_status(Message, Data) of
         {ok, NewData} ->
-            Response = {ok, ocpp_message:new_response(
-                              'StatusNotification',
-                              #{}, MessageId)},
+            Response =
+                ocpp_message:new_response('StatusNotification', #{}, MessageId),
+            send_response(Response, Data),
             UpdatedData = NewData;
         {error, _} ->
-            Response = {error, ocpp_error:new('GenericError', MessageId)},
+            Response = ocpp_error:new('GenericError', MessageId),
+            send_error(Response, Data),
             UpdatedData = Data
     end,
-    {next_state, provisioning, UpdatedData, [{reply, From, Response}]};
+    {next_state, provisioning, UpdatedData};
 provisioning(cast, disconnect, Data) ->
     %% The station has already been accepted here so transition is the
     %% same as for `idle'
@@ -249,24 +233,18 @@ provisioning(cast, disconnect, Data) ->
 provisioning(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
-idle({call, From}, {call, Message, Timeout}, Data) ->
-    case call_station(Message, Data, Timeout) of
-        {ok, NewData} ->
-            {keep_state, NewData#data{reply_to={ocpp_message:id(Message), From}}};
-        {{error, _} = Error, NewData} ->
-            {keep_state, NewData, [{reply, From, Error}]}
-    end;
 idle({call, From}, {send_request, Message, Timeout}, Data) ->
     {Reply, NewData} = call_station(Message, Data, Timeout),
     {keep_state, NewData, [{reply, From, Reply}]};
-idle({call, From}, {rpccall, _, _, Message}, Data) ->
-    NewData = handle_rpccall(Message, From, Data),
+idle(cast, {rpccall, _, _, Message}, Data) ->
+    NewData = handle_rpccall(Message, Data),
     {next_state, idle, NewData};
-idle(cast, {error, Error}, #data{pending = {MessageId, From}} = Data) ->
+idle(cast, {error, Error}, #data{pending = MessageId} = Data) ->
     ErrorId = ocpp_error:id(Error),
     if
         MessageId =:= ErrorId ->
-            {next_state, idle, clear_pending_request(Data), [{reply, From, {error, Error}}]};
+            send_error(Error, Data),
+            {next_state, idle, clear_pending_request(Data)};
         MessageId =/= ErrorId ->
             keep_state_and_data
     end;
@@ -281,11 +259,11 @@ offline({call, From}, {connect, Pid}, Data) ->
 offline({call, From}, {send_request, _, _}, _Data) ->
     {keep_state_and_data, [{reply, From, {error, offline}}]}.
 
-reconnecting({call, _From}, {rpccall, MessageType, _, _}, Data)
+reconnecting(cast, {rpccall, MessageType, _, _}, Data)
   when MessageType =:= 'Heartbeat';
        MessageType =:= 'StatusNotification' ->
     {next_state, provisioning, Data, [postpone]};
-reconnecting({call, _From}, {rpccall, MessageType, _, _}, Data)
+reconnecting(cast, {rpccall, MessageType, _, _}, Data)
   when MessageType =:= 'BootNotification' ->
     {next_state, connected, Data, [postpone]};
 reconnecting({call, From}, {send_request, _, _}, _Data) ->
@@ -311,12 +289,6 @@ terminate(_Reason, _State, _Data) ->
     ok.
 
 handle_event(cast, {rpcreply, _MsgType, MessageId, Message},
-             #data{pending_call = {TRef, MessageId},
-                   reply_to = {MessageId, From}} = Data) ->
-    timer:cancel(TRef),
-    {keep_state, Data#data{pending_call = undefined, reply_to = undefined},
-     [{reply, From, {ok, Message}}]};
-handle_event(cast, {rpcreply, _MsgType, MessageId, Message},
              #data{pending_call = {TRef, MessageId}} = Data) ->
     ocpp_handler:rpc_reply(Data#data.stationid, Message),
     timer:cancel(TRef),
@@ -324,12 +296,8 @@ handle_event(cast, {rpcreply, _MsgType, MessageId, Message},
 handle_event(cast, {rpcreply, _, _, _}, _) ->
     keep_state_and_data;
 handle_event(info, {call_timeout, MessageId},
-             #data{pending_call = {_TRef, MessageId},
-                   reply_to = {MessageId, From}} = Data) ->
-    {keep_state, Data#data{pending_call = undefined, reply_to = undefined},
-     [{reply, From, {error, timeout}}]};
-handle_event(info, {call_timeout, MessageId},
              #data{pending_call = {_TRef, MessageId}} = Data) ->
+    %% TODO ocpp_handler:rpc_timeout(Data#data.stationid, MessageId),
     {keep_state, Data#data{pending_call = undefined}};
 handle_event(info, {call_timeout, _}, _) ->
     keep_state_and_data;
@@ -376,12 +344,20 @@ heartbeat_response(MessageId) ->
                 [{offset, "Z"}, {unit, second}]))},
      MessageId).
 
-handle_rpccall(Message, From, Data) ->
+handle_rpccall(Message, Data) ->
     ocpp_handler:rpc_request(Data#data.stationid, Message),
-    Data#data{pending = {ocpp_message:id(Message), From}}.
+    Data#data{pending = ocpp_message:id(Message)}.
 
 init_evse(EVSE) ->
     maps:from_list(lists:zip(lists:seq(1, length(EVSE)), EVSE)).
+
+send_error(Error, #data{connection = {ConnectionPid, _Ref}}) ->
+    ConnectionPid ! {ocpp, {rpcerror, Error}},
+    ok.
+
+send_response(Response, #data{connection = {ConnectionPid, _Ref}}) ->
+    ConnectionPid ! {ocpp, {rpcreply, Response}},
+    ok.
 
 setup_connection(Data, ConnectionPid) ->
     Ref = monitor(process, ConnectionPid),
