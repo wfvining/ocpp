@@ -292,6 +292,8 @@ to_binary(X) when is_list(X) ->
 to_binary(X) ->
     X.
 
+prepare_value(V) when is_boolean(V) ->
+    V;
 prepare_value(V) when is_atom(V) ->
     prepare_value(atom_to_binary(V));
 prepare_value(V) when is_map(V) ->

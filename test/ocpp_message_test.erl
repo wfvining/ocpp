@@ -159,3 +159,19 @@ atom_keys_test_() ->
                                <<"modem">>,
                                ocpp_message:get(<<"chargingStation">>, Message))))
       end}}.
+
+booleans_test_() ->
+    {"can construct a message with boolean properties",
+     {setup, fun load_schemas/0, fun teardown_apps/1,
+      fun() ->
+              Message = ocpp_message:new_request(
+                          'NotifyReport',
+                          #{requestId => 1,
+                            generatedAt => list_to_binary(
+                                             calendar:system_time_to_rfc3339(
+                                               erlang:system_time(second),
+                                               [{offset, "Z"}, {unit, second}])),
+                            seqNo => 0,
+                            tbc => true}),
+              ?assert(ocpp_message:get(<<"tbc">>, Message))
+      end}}.
