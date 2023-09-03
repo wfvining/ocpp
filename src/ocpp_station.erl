@@ -44,7 +44,7 @@
         {stationid :: binary(),
          connection = disconnected :: disconnected | {pid(), reference()},
          evse = #{} :: #{pos_integer() => ocpp_evse:evse()},
-         pending = undefined :: undefined | {ocpp_message:messageid(), gen_statem:from()},
+         pending = undefined :: undefined | ocpp_message:messageid(),
          pending_call = undefined :: undefined | {timer:tref(), ocpp_message:messageid()}}).
 
 -spec start_link(StationId :: binary(),
@@ -63,9 +63,7 @@ connect(Station) ->
     gen_statem:call(?registry(Station), {connect, self()}).
 
 %% @doc Handle an OCPP remote procedure call from the station.
--spec rpccall(Station :: binary(), Request :: ocpp_message:message()) ->
-          {ok, Response :: ocpp_message:message()} |
-          {error, Reason :: ocpp_rpc:rpcerror()}.
+-spec rpccall(Station :: binary(), Request :: ocpp_message:message()) -> ok.
 rpccall(Station, Request) ->
     MessageType = ocpp_message:request_type(Request),
     MessageId = ocpp_message:id(Request),
