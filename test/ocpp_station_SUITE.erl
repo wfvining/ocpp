@@ -2,11 +2,17 @@
 -module(ocpp_station_SUITE).
 
 -compile(export_all).
+-compile(nowarn_export_all).
 
 -include_lib("common_test/include/ct.hrl").
 -include_lib("stdlib/include/assert.hrl").
 
 -define(stationid(Name), atom_to_binary(Name)).
+-define(nowutc,
+        list_to_binary(
+          calendar:system_time_to_rfc3339(
+            erlang:system_time(second),
+            [{offset, "Z"}, {unit, second}]))).
 -define(BOOT_NOTIFICATION,
         #{chargingStation => #{model => <<"station_test">>,
                                vendorName => <<"common_test">>},
@@ -14,10 +20,7 @@
 -define(BOOT_RESPONSE(Status),
         #{status => Status,
           interval => 10,
-          currentTime =>
-              list_to_binary(calendar:system_time_to_rfc3339(
-                               erlang:system_time(second),
-                               [{offset, "Z"}, {unit, second}]))}).
+          currentTime => ?nowutc}).
 
 
 %%--------------------------------------------------------------------
@@ -93,8 +96,12 @@ init_per_testcase(Case, Config)
   when Case =:= boot;
        Case =:= message_before_boot ->
     start_station(?stationid(Case), Config);
-init_per_testcase(boot_pending, Config) ->
-    StationId = ?stationid(boot_pending),
+init_per_testcase(Case, Config)
+ when Case =:= boot_pending;
+      Case =:= report_pending;
+      Case =:= multiple_reports;
+      Case =:= report_rejected ->
+    StationId = ?stationid(Case),
     Config1 = start_station(StationId, Config),
     ok = ocpp_station:connect(StationId),
     boot_station(StationId, <<"Pending">>),
@@ -104,6 +111,12 @@ init_per_testcase(boot_accepted, Config) ->
     Config1 = start_station(StationId, Config),
     ok = ocpp_station:connect(StationId),
     boot_station(StationId, <<"Accepted">>),
+    Config1;
+init_per_testcase(report_idle, Config) ->
+    StationId = ?stationid(report_idle),
+    Config1 = start_station(StationId, Config),
+    ok = ocpp_station:connect(StationId),
+    provision_idle(StationId),
     Config1;
 init_per_testcase(Case, Config)
   when Case =:= offline_reboot;
@@ -127,7 +140,11 @@ end_per_testcase(TestCase, Config)
        TestCase =:= boot_pending;
        TestCase =:= boot_accepted;
        TestCase =:= offline_reboot;
-       TestCase =:= offline_reconnect ->
+       TestCase =:= offline_reconnect;
+       TestCase =:= report_pending;
+       TestCase =:= report_idle;
+       TestCase =:= report_rejected;
+       TestCase =:= multiple_reports ->
     Sup = ?config(stationsup, Config),
     unlink(Sup),
     ocpp_station_sup:stop(Sup),
@@ -157,7 +174,11 @@ groups() ->
        {group, offline},
        {group, configure}]},
      {offline, [parallel], [offline_reconnect, offline_reboot]},
-     {configure, []}].
+     {configure, [parallel],
+      [report_pending,
+       report_idle,
+       multiple_reports,
+       report_rejected]}].
 
 %%--------------------------------------------------------------------
 %% @spec all() -> GroupsAndTestCases | {skip,Reason}
@@ -240,9 +261,7 @@ boot_accepted(Config) ->
     StatusNotification =
         ocpp_message:new_request(
           'StatusNotification',
-          #{timestamp => list_to_binary(
-                           calendar:system_time_to_rfc3339(
-                             erlang:system_time(second), [{offset, "Z"}, {unit, second}])),
+          #{timestamp => ?nowutc,
             connectorStatus => <<"Available">>,
             evseId => 1,
             connectorId => 1}),
@@ -294,6 +313,122 @@ offline_idle(StationId) ->
             ct:fail("offline_idle failed: ~p", [Reason])
     end.
 
+report_pending() ->
+    [{doc, "handle report requests and notifications in the pending state"},
+     {timetrap, 5000}].
+report_pending(Config) ->
+    StationId = ?config(stationid, Config),
+    %% sending an unsolicited ReportNotification results in a security error
+    ReportNotification =
+        ocpp_message:new_request(
+          'NotifyReport',
+          #{requestId => 1,
+            generatedAt => ?nowutc,
+            tbc => true,
+            seqNo => 0}),
+    ok = ocpp_station:rpccall(StationId, ReportNotification),
+    receive_ocpp(ocpp_message:id(ReportNotification), rpcerror,
+                 fun(Msg) -> ocpp_error:code(Msg) =:= <<"SecurityError">> end),
+    solicit_base_report(StationId, [{requestid, 1}, {status, <<"Accepted">>}]),
+    ok = ocpp_station:rpccall(StationId, ReportNotification),
+    receive_ocpp(ocpp_message:id(ReportNotification), rpcreply,
+                 fun (Msg) ->
+                         ocpp_message:response_type(Msg) =:= 'NotifyReport'
+                 end),
+    %% Send a second part
+    ReportNotification1 =
+        ocpp_message:new_request(
+          'NotifyReport',
+          #{requestId => 1,
+            generatedAt => ?nowutc,
+            tbc => false,
+            seqNo => 1}),
+    ok = ocpp_station:rpccall(StationId, ReportNotification1),
+    receive_ocpp(ocpp_message:id(ReportNotification1), rpcreply,
+                 fun (Msg) ->
+                         ocpp_message:response_type(Msg) =:= 'NotifyReport'
+                 end),
+    %% A subsequent part (after tbc=>false) should again result in a security error
+    ReportNotification2 =
+        ocpp_message:new_request(
+          'NotifyReport',
+          #{requestId => 1,
+            generatedAt => ?nowutc,
+            tbc => false,
+            seqNo => 2}),
+    ok = ocpp_station:rpccall(StationId, ReportNotification2),
+    receive_ocpp(ocpp_message:id(ReportNotification2), rpcerror,
+                 fun(Msg) -> ocpp_error:code(Msg) =:= <<"SecurityError">> end).
+
+
+report_idle() ->
+    [{doc, "can process reports in the idle state."},
+     {timetrap, 5000}].
+report_idle(Config) ->
+    StationId = ?config(stationid, Config),
+    %% sending an unsolicited ReportNotification results in a security error
+    ReportNotification =
+        ocpp_message:new_request(
+          'NotifyReport',
+          #{requestId => 1,
+            generatedAt => ?nowutc,
+            tbc => true,
+            seqNo => 0}),
+    solicit_base_report(StationId, [{requestid, 1}, {status, <<"Accepted">>}]),
+    ok = ocpp_station:rpccall(StationId, ReportNotification),
+    receive_ocpp(ocpp_message:id(ReportNotification), rpcreply,
+                 fun (Msg) ->
+                         ocpp_message:response_type(Msg) =:= 'NotifyReport'
+                 end),
+    %% Send a second part
+    ReportNotification1 =
+        ocpp_message:new_request(
+          'NotifyReport',
+          #{requestId => 1,
+            generatedAt => ?nowutc,
+            tbc => false,
+            seqNo => 1}),
+    ok = ocpp_station:rpccall(StationId, ReportNotification1),
+    receive_ocpp(ocpp_message:id(ReportNotification1), rpcreply,
+                 fun (Msg) ->
+                         ocpp_message:response_type(Msg) =:= 'NotifyReport'
+                 end).
+
+multiple_reports() ->
+    [{doc, "it is possible to request and receive multiple reports concurrently"},
+     {timetrap, 5000}].
+multiple_reports(Config) ->
+    StationId = ?config(stationid, Config),
+    solicit_base_report(StationId, [{requestid, 1}]),
+    solicit_base_report(StationId, [{requestid, 2}]),
+    MessageBody = #{requestId => 1, generatedAt => ?nowutc, tbc => true, seqNo => 0},
+    RepNot1 = ocpp_message:new_request('NotifyReport', MessageBody#{tbc => false}),
+    RepNot2 = ocpp_message:new_request('NotifyReport', MessageBody#{requestId => 2}),
+    ok = ocpp_station:rpccall(StationId, RepNot2),
+    IsNotifyReport = fun(Msg) -> ocpp_message:response_type(Msg) =:= 'NotifyReport' end,
+    receive_ocpp(ocpp_message:id(RepNot2), rpcreply, IsNotifyReport),
+    ok = ocpp_station:rpccall(StationId, RepNot1),
+    receive_ocpp(ocpp_message:id(RepNot1), rpcreply, IsNotifyReport),
+    RepNot3 = ocpp_message:new_request(
+                'NotifyReport', MessageBody#{requestId => 2, tbc => false, seqNo => 1}),
+    ok = ocpp_station:rpccall(StationId, RepNot3),
+    receive_ocpp(ocpp_message:id(RepNot3), rpcreply, IsNotifyReport).
+
+report_rejected() ->
+    [{doc, "if a station in the pending state sends a NotifyReportRequest for "
+           "a GetReportRequest that it rejected it results in a security error."},
+     {timetrap, 5000}].
+report_rejected(Config) ->
+    StationId = ?config(stationid, Config),
+    solicit_base_report(StationId, [{status, <<"Rejected">>}, {requestid, 1}]),
+    ReportNotification =
+        ocpp_message:new_request(
+          'NotifyReport',
+          #{requestId => 1, generatedAt => ?nowutc, tbc => false, seqNo => 0}),
+    ok = ocpp_station:rpccall(StationId, ReportNotification),
+    receive_ocpp(ocpp_message:id(ReportNotification), rpcerror,
+                 fun(Msg) -> ocpp_error:code(Msg) =:= <<"SecurityError">> end).
+
 %%% Helper functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 boot_station(StationId, Status) ->
@@ -332,6 +467,23 @@ send_heartbeat(StationId) ->
     ok = ocpp_station:rpccall(StationId, Heartbeat),
     receive_ocpp(ocpp_message:id(Heartbeat), rpcreply,
                  fun(Msg) -> ocpp_message:response_type(Msg) =:= 'Heartbeat' end).
+
+solicit_base_report(StationId, Options) ->
+    Status = proplists:get_value(status, Options, <<"Accepted">>),
+    ReqId = proplists:get_value(requestid, Options, 1),
+    GetReport =
+        ocpp_message:new_request(
+          'GetBaseReport', #{requestId => ReqId, reportBase => <<"FullInventory">>}),
+    ok = ocpp_station:call(StationId, GetReport),
+    receive_ocpp(ocpp_message:id(GetReport), rpccall,
+                 fun (Msg) ->
+                         (ocpp_message:request_type(Msg) =:= 'GetBaseReport')
+                             and (ocpp_message:get(<<"requestId">>, Msg) =:= ReqId)
+                 end),
+    GetReportResponse =
+        ocpp_message:new_response(
+          'GetBaseReport', #{status => Status}, ocpp_message:id(GetReport)),
+    ocpp_station:rpcreply(StationId, GetReportResponse).
 
 start_station(StationId, Config) ->
     {ok, Sup} = ocpp_station_sup:start_link(StationId, [ocpp_evse:new(1)]),

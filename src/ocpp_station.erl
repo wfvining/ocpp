@@ -45,7 +45,10 @@
          connection = disconnected :: disconnected | {pid(), reference()},
          evse = #{} :: #{pos_integer() => ocpp_evse:evse()},
          pending = undefined :: undefined | ocpp_message:messageid(),
-         pending_call = undefined :: undefined | {timer:tref(), ocpp_message:messageid()}}).
+         pending_call = undefined :: undefined | {timer:tref(), ocpp_message:messageid()},
+         pending_report = undefined :: undefined | {ocpp_message:messageid(), integer()},
+         expecting_report = [] :: [integer()],
+         device_model = ocpp_device_model:new() :: ocpp_device_model:device_model()}).
 
 -spec start_link(StationId :: binary(),
                  EVSE :: [ocpp_evse:evse()]) -> gen_statem:start_ret().
@@ -183,7 +186,12 @@ booting(EventType, Event, Data) ->
 
 boot_pending({call, From}, {send_request, Message, Timeout}, Data) ->
     case ocpp_message:request_type(Message) of
-        'SetVariables' ->
+        MessageType
+          when MessageType =:= 'SetVariables';
+               MessageType =:= 'GetVariables';
+               MessageType =:= 'GetBaseReport';
+               MessageType =:= 'GetReport';
+               MessageType =:= 'TriggerMessage' ->
             {Reply, NewData} = call_station(Message, Data, Timeout),
             {keep_state, NewData, [{reply, From, Reply}]};
         _ ->
@@ -193,13 +201,26 @@ boot_pending(cast, disconnect, Data) ->
     {next_state, disconnected, cleanup_connection(Data)};
 boot_pending(cast, {rpccall, 'BootNotification', _, _}, Data) ->
     {next_state, connected, Data, [postpone]};
+boot_pending(cast, {rpccall, 'NotifyReport', MessageId, Message},
+             #data{expecting_report = ExpectedReports} = Data) ->
+    RequestId = ocpp_message:get(<<"requestId">>, Message),
+    case lists:member(RequestId, ExpectedReports) of
+        true ->
+            Response = ocpp_message:new_response('NotifyReport', #{}, MessageId),
+            send_response(Response, Data),
+            {keep_state, process_report(Message, Data)};
+        false ->
+            Error = ocpp_error:new('SecurityError', MessageId),
+            ok = send_error(Error, Data),
+            keep_state_and_data
+    end;
 boot_pending(cast, {rpccall, _, _, Message}, Data) ->
     Error =
         ocpp_error:new(
           'SecurityError',
           ocpp_message:id(Message),
           [{description,
-            <<"The charging station is not allowed to initiate "
+            <<"Unless requested, the charging station is not allowed to initiate "
               "sending any messages other than a BootNotificationRequest "
               "before being accepted.">>}]),
     ok = send_error(Error, Data),
@@ -234,6 +255,25 @@ provisioning(EventType, Event, Data) ->
 idle({call, From}, {send_request, Message, Timeout}, Data) ->
     {Reply, NewData} = call_station(Message, Data, Timeout),
     {keep_state, NewData, [{reply, From, Reply}]};
+idle(cast, {rpccall, 'NotifyReport', MessageId, Message},
+     #data{expecting_report = ExpectedReports} = Data) ->
+    RequestId = ocpp_message:get(<<"requestId">>, Message),
+    case lists:member(RequestId, ExpectedReports) of
+        true ->
+            Response = ocpp_message:new_response('NotifyReport', #{}, MessageId),
+            send_response(Response, Data),
+            {keep_state, process_report(Message, Data)};
+        false ->
+            logger:notice(
+              "Received unexpedted report~n"
+              "MessageId = ~p~n"
+              "requestId = ~p~n"
+              "seqNo = ~p~n",
+              [MessageId,
+               ocpp_message:get(<<"requestId">>, Message),
+               ocpp_message:get(<<"seqNo">>, Message)]),
+            keep_state_and_data
+    end;
 idle(cast, {rpccall, _, _, Message}, Data) ->
     NewData = handle_rpccall(Message, Data),
     {next_state, idle, NewData};
@@ -286,11 +326,30 @@ code_change(_OldVsn, _NewVsn, Data) ->
 terminate(_Reason, _State, _Data) ->
     ok.
 
+handle_event(cast, {rpcreply, MsgType, MessageId, Message},
+     #data{pending_report = {RequestId, MessageId},
+           pending_call = {TRef, MessageId}} = Data)
+  when MsgType =:= 'GetReport';
+       MsgType =:= 'GetBaseReport' ->
+    timer:cancel(TRef),
+    NewData =
+        case ocpp_message:get(<<"status">>, Message) of
+            <<"Accepted">> ->
+                Data#data{pending_report = undefined,
+                          expecting_report = [RequestId | Data#data.expecting_report],
+                          pending_call = undefined};
+            _ ->
+                %% TODO notify the ocpp_handler that the report was not accepted
+                Data#data{pending_report = undefined,
+                          pending_call = undefined}
+        end,
+    {keep_state, NewData};
 handle_event(cast, {rpcreply, _MsgType, MessageId, Message},
              #data{pending_call = {TRef, MessageId}} = Data) ->
     ocpp_handler:rpc_reply(Data#data.stationid, Message),
     timer:cancel(TRef),
-    {keep_state, Data#data{pending_call = undefined}};
+    {keep_state, Data#data{pending_call = undefined,
+                           pending_report = undefined}};
 handle_event(cast, {rpcreply, _, _, _}, _) ->
     keep_state_and_data;
 handle_event(info, {call_timeout, MessageId},
@@ -305,6 +364,20 @@ handle_event(info, {'DOWN', Ref, process, Pid, _},
 
 %%%%%% Internal functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+add_attribute(DeviceModel, ComponentName, VariableName, VariableIdentifiers, Properties) ->
+    ocpp_device_model:add_attribute(
+      DeviceModel,
+      ComponentName,
+      VariableName,
+      VariableIdentifiers,
+      proplists:get_value(attribute_type, Properties, 'Actual'),
+      %% XXX (wfv) the empty binary is an
+      %% arbitrary choice for a filler value when
+      %% the variable is write-only
+      proplists:get_value(attribute_value, Properties, <<"">>),
+      proplists:get_value(attribute_mutability, Properties, [read, write]),
+      proplists:get_value(attribute_persistent, Properties, false)).
+
 boot_status_to_state(Message) ->
     case ocpp_message:get(<<"status">>, Message) of
         <<"Accepted">> -> provisioning;
@@ -318,7 +391,15 @@ call_station(Message, #data{pending_call = undefined} = Data, Timeout) ->
     MessageId = ocpp_message:id(Message),
     {ok, TRef} = timer:send_after(Timeout, self(), {call_timeout, MessageId}),
     NewData = Data#data{pending_call = {TRef, MessageId}},
-    {ok, NewData};
+    case ocpp_message:request_type(Message) of
+        MessageType
+          when MessageType =:= 'GetBaseReport';
+               MessageType =:= 'GetReport' ->
+            {ok, NewData#data{pending_report = {ocpp_message:get(<<"requestId">>, Message),
+                                                MessageId}}};
+        _ ->
+            {ok, NewData}
+    end;
 call_station(_Message, Data, _) ->
     {{error, busy}, Data}.
 
@@ -348,6 +429,68 @@ handle_rpccall(Message, Data) ->
 
 init_evse(EVSE) ->
     maps:from_list(lists:zip(lists:seq(1, length(EVSE)), EVSE)).
+
+process_report(ReportMsg, Data) ->
+    ReportData = ocpp_message:get(<<"reportData">>, ReportMsg, []),
+    RequestId = ocpp_message:get(<<"requestId">>, ReportMsg),
+    Seq = ocpp_message:get(<<"seqNo">>, ReportMsg),
+    ToBeContinued = ocpp_message:get(<<"tbc">>, ReportMsg, false),
+    logger:debug("Processing report part ~p, tbc=~p", [Seq, ToBeContinued]),
+    lists:foreach(
+      fun(RD) -> process_report_data(RD, Data#data.device_model) end, ReportData),
+    if ToBeContinued ->
+            Data;
+       not ToBeContinued ->
+            Data#data{expecting_report = lists:delete(RequestId, Data#data.expecting_report)}
+    end.
+
+process_report_data(ReportData, DeviceModel) ->
+    ComponentName = ocpp_message:get(<<"component/name">>, ReportData),
+    VariableName = ocpp_message:get(<<"variable/name">>, ReportData),
+    Properties = report_variable_properties(ReportData),
+    VariableIdentifiers =
+        maps:from_list(
+          select_properties(
+            Properties,
+            [evse, connector, component_instance, variable_instance])),
+    try ocpp_device_model:variable_exists(DeviceModel,
+                                          ComponentName,
+                                          VariableName,
+                                          VariableIdentifiers)
+    of
+        true ->
+            true = add_attribute(DeviceModel,
+                                 ComponentName,
+                                 VariableName,
+                                 VariableIdentifiers,
+                                 Properties);
+        false ->
+            true = ocpp_device_model:add_variable(
+                     DeviceModel,
+                     ComponentName,
+                     VariableName,
+                     VariableIdentifiers,
+                     maps:from_list(
+                       select_properties(Properties,
+                                         [unit, datatype, minlimit, maxlimit,
+                                          valuelist, supports_monitoring]))),
+            true = add_attribute(DeviceModel,
+                                 ComponentName,
+                                 VariableName,
+                                 VariableIdentifiers,
+                                 Properties)
+    catch
+        error:ambiguous ->
+            logger:error("Skipping report data due to ambiguous variable:~n"
+                         "ComponentName = ~p~n"
+                         "VariableName = ~p~n"
+                         "VariableProperties = ~p~n",
+                         [ComponentName, VariableName, Properties])
+    end.
+
+select_properties(Proplist, Keys) ->
+    Xs = [proplists:lookup(K, Proplist) || K <- Keys],
+    [X || X <- Xs, X =/= none].
 
 send_error(Error, #data{connection = {ConnectionPid, _Ref}}) ->
     ConnectionPid ! {ocpp, {rpcerror, Error}},
@@ -390,3 +533,52 @@ update_status(Message, Data) ->
         {error, _Reason} ->
             {error, Data}
     end.
+
+load_attribute(Attr) ->
+    [{type, ocpp_message:get(<<"type">>, Attr, nil)},
+     {value, ocpp_message:get(<<"value">>, Attr, nil)},
+     {mutability, ocpp_message:get(<<"mutability">>, Attr, <<"ReadWrite">>)},
+     {persistent, ocpp_message:get(<<"persistent">>, Attr, false)},
+     {constant, ocpp_message:get(<<"constant">>, Attr, false)}].
+
+report_attributes(Attrs) ->
+    [load_attribute(Attr) || Attr <- Attrs].
+
+report_variable_properties(ReportData) ->
+    %% TODO construct a proplist with the optional properties
+    %% contained in `ReportData'
+    ComponentInstance = ocpp_message:get(<<"component/instance">>, ReportData, nil),
+    EVSE = ocpp_message:get(<<"component/evse">>, ReportData, nil),
+    {EVSEId, ConnectorId} =
+        if EVSE =/= nil ->
+                {ocpp_message:get(<<"id">>, EVSE),
+                 ocpp_message:get(<<"connectorId">>, EVSE, nil)};
+           EVSE =:= nil ->
+                {nil, nil}
+        end,
+    VariableInstance = ocpp_message:get(<<"variable/instance">>, ReportData, nil),
+    Attributes = report_attributes(ocpp_message:get(<<"variableAttribute">>, ReportData)),
+    Unit = ocpp_message:get(<<"variableCharacteristics/unit">>, ReportData, nil),
+    DataType = ocpp_message:get(<<"variableCharacteristics/dataType">>, ReportData),
+    MinLimit = ocpp_message:get(<<"variableCharacteristics/minLimit">>, ReportData, nil),
+    MaxLimit = ocpp_message:get(<<"variableCharacteristics/maxLimit">>, ReportData, nil),
+    ValuesListCSV = ocpp_message:get(<<"variableCharacteristics/valuesList">>, ReportData, nil),
+    ValuesList =
+        if ValuesListCSV =/= nil ->
+                binary:split(ValuesListCSV, <<",">>, [global]);
+           ValuesListCSV =:= nil ->
+                nil
+        end,
+    SuppportsMonitoring = ocpp_message:get(<<"variableCharacteristics/supportsMonitoring">>, ReportData),
+    [X || {_, Val} = X <- [{component_instance, ComponentInstance},
+                           {evse, EVSEId},
+                           {connector, ConnectorId},
+                           {variable_instance, VariableInstance},
+                           {attributes, Attributes},
+                           {unit, Unit},
+                           {datatype, DataType},
+                           {minlimit, MinLimit},
+                           {maxlimit, MaxLimit},
+                           {valuelist, ValuesList},
+                           {supports_monitoring, SuppportsMonitoring}],
+          Val =/= nil].
