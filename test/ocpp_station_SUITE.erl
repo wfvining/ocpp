@@ -360,21 +360,29 @@ report_pending(Config) ->
     receive_ocpp(ocpp_message:id(ReportNotification2), rpcerror,
                  fun(Msg) -> ocpp_error:code(Msg) =:= <<"SecurityError">> end).
 
-
 report_idle() ->
     [{doc, "can process reports in the idle state."},
-     {timetrap, 5000}].
+     {timetrap, 1000}].
 report_idle(Config) ->
     StationId = ?config(stationid, Config),
-    %% sending an unsolicited ReportNotification results in a security error
+    solicit_base_report(StationId, [{requestid, 1}, {status, <<"Accepted">>}]),
     ReportNotification =
         ocpp_message:new_request(
           'NotifyReport',
           #{requestId => 1,
             generatedAt => ?nowutc,
             tbc => true,
-            seqNo => 0}),
-    solicit_base_report(StationId, [{requestid, 1}, {status, <<"Accepted">>}]),
+            seqNo => 0,
+            reportData => [#{component => #{name => <<"component">>,
+                                            evse => #{id => 1, connectorId => 1}},
+                             variable => #{name => <<"foo">>,
+                                           instance => <<"bar">>},
+                             variableAttribute => [#{type => 'Actual', value => <<"1.2">>,
+                                                     mutability => <<"ReadOnly">>},
+                                                   #{type => 'Target', value => <<"1.0">>}],
+                             variableCharacteristics =>
+                                 #{dataType => <<"decimal">>,
+                                   supportsMonitoring => false}}]}),
     ok = ocpp_station:rpccall(StationId, ReportNotification),
     receive_ocpp(ocpp_message:id(ReportNotification), rpcreply,
                  fun (Msg) ->
@@ -387,12 +395,36 @@ report_idle(Config) ->
           #{requestId => 1,
             generatedAt => ?nowutc,
             tbc => false,
-            seqNo => 1}),
+            seqNo => 1,
+            reportData => [#{component => #{name => <<"component">>,
+                                            evse => #{id => 1, connectorId => 1}},
+                             variable => #{name => <<"foo">>,
+                                           instance => <<"baz">>},
+                             variableAttribute => [#{type => 'Actual', value => <<"1.5">>,
+                                                     mutability => <<"ReadOnly">>}],
+                             variableCharacteristics =>
+                                 #{dataType => <<"string">>,
+                                   supportsMonitoring => false}}]}),
     ok = ocpp_station:rpccall(StationId, ReportNotification1),
     receive_ocpp(ocpp_message:id(ReportNotification1), rpcreply,
                  fun (Msg) ->
                          ocpp_message:response_type(Msg) =:= 'NotifyReport'
-                 end).
+                 end),
+    {ok, <<"1.5">>} = ocpp_station:lookup_variable(
+                        StationId,
+                        <<"Component">>, <<"FOO">>,
+                        #{variable_instance => <<"Baz">>, evse => 1, connector => 1},
+                        'Actual'),
+    {ok, 1.2} = ocpp_station:lookup_variable(
+                  StationId,
+                  <<"Component">>, <<"Foo">>,
+                  #{variable_instance => <<"bar">>, evse => 1, connector => 1},
+                  'Actual'),
+    {ok, 1.0} = ocpp_station:lookup_variable(
+                  StationId,
+                  <<"Component">>, <<"Foo">>,
+                  #{variable_instance => <<"bar">>, evse => 1, connector => 1},
+                  'Target').
 
 multiple_reports() ->
     [{doc, "it is possible to request and receive multiple reports concurrently"},

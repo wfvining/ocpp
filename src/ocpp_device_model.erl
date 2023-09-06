@@ -6,7 +6,8 @@
 
 -export([new/0, add_variable/5, add_attribute/8, variable_exists/4, get_value/5]).
 
--export_type([device_model/0, attribute/0, charactersitics/0]).
+-export_type([device_model/0, attribute/0, charactersitics/0,
+              variable_identifiers/0, attribute_type/0]).
 
 -type attribute_type() :: ocpp_message:attribute_type().
 -type attribute() ::
@@ -52,14 +53,17 @@ add_variable(DeviceModel,
              VariableIdentifiers,
              Characteristics) ->
     ets:insert(DeviceModel#device_model.characteristics,
-               {ComponentName, VariableName, VariableIdentifiers, Characteristics}).
+               {string:uppercase(ComponentName),
+                string:uppercase(VariableName),
+                uppercase_identifiers(VariableIdentifiers),
+                Characteristics}).
 
 -spec add_attribute(DeviceModel :: device_model(),
                     ComponentName :: binary(),
                     VariableName :: binary(),
                     VariableIdentifiers :: variable_identifiers(),
                     AttributeType :: attribute_type(),
-                    AttributeValue :: binary(),
+                    AttributeValue :: binary() | undefined,
                     Mutability :: [read | write],
                     Persistent :: boolean()) ->
                        boolean().
@@ -74,17 +78,32 @@ add_attribute(DeviceModel,
     Type = get_type(DeviceModel, ComponentName, VariableName, VariableIdentifiers),
     Value = parse_value(Type, AttributeValue),
     ets:insert(DeviceModel#device_model.attributes,
-               {ComponentName,
-                VariableName,
-                VariableIdentifiers,
+               {string:uppercase(ComponentName),
+                string:uppercase(VariableName),
+                uppercase_identifiers(VariableIdentifiers),
                 AttributeType,
                 Value,
                 Mutability,
                 Persistent}).
 
+uppercase_identifiers(VariableIdentifiers) ->
+    uppercase_keys([variable_instance, component_instance], VariableIdentifiers).
+
+uppercase_keys(Keys, Map) ->
+    lists:foldl(fun(Key, Acc) -> uppercase_if_exists(Key, Acc) end, Map, Keys).
+
+uppercase_if_exists(Key, Map) ->
+    case maps:is_key(Key, Map) of
+        true -> Map#{Key => string:uppercase(maps:get(Key, Map))};
+        false -> Map
+    end.
+
 get_type(DeviceModel, ComponentName, VariableName, VariableIdentifiers) ->
     case ets:match(DeviceModel#device_model.characteristics,
-                   {ComponentName, VariableName, VariableIdentifiers, '$1'})
+                   {string:uppercase(ComponentName),
+                    string:uppercase(VariableName),
+                    uppercase_identifiers(VariableIdentifiers),
+                    '$1'})
     of
         [[Characteristics]] ->
             maps:get(datatype, Characteristics);
@@ -107,7 +126,10 @@ get_value(#device_model{attributes = Attributes},
           VariableIdentifiers,
           AttributeType) ->
     case ets:match(Attributes,
-                   {ComponentName, VariableName, VariableIdentifiers, AttributeType,
+                   {string:uppercase(ComponentName),
+                    string:uppercase(VariableName),
+                    uppercase_identifiers(VariableIdentifiers),
+                    AttributeType,
                     '$1', '_', '_'})
     of
         [[Value]] -> Value;
@@ -115,6 +137,8 @@ get_value(#device_model{attributes = Attributes},
         _ -> error(ambiguous)
     end.
 
+parse_value(_, undefined) ->
+    undefined;
 parse_value(<<"string">>, Value) ->
     Value;
 parse_value(<<"decimal">>, Value) ->
@@ -141,7 +165,10 @@ parse_value(_, Value) ->
 variable_exists(#device_model{characteristics = Characteristics},
                 ComponentName, VariableName, VariableIdentifiers) ->
     case ets:match_object(Characteristics,
-                          {ComponentName, VariableName, VariableIdentifiers, '_'})
+                          {string:uppercase(ComponentName),
+                           string:uppercase(VariableName),
+                           uppercase_identifiers(VariableIdentifiers),
+                           '_'})
     of
         [] -> false;
         [_Var] -> true;

@@ -20,6 +20,7 @@
          call/2, call/3, rpccall/2,
          reply/2, rpcreply/2,
          error/2, %rpcerror/2,
+         lookup_variable/5,
          connect/1]).
 
 -export([init/1, callback_mode/0, code_change/3, terminate/3]).
@@ -114,6 +115,21 @@ rpcreply(Station, Response) ->
 -spec error(StationId :: binary(), Error :: ocpp_error:error()) -> ok.
 error(StationId, Error) ->
     gen_statem:cast(?registry(StationId), {error, Error}).
+
+-spec lookup_variable(StationId :: binary(),
+                      ComponentName :: binary(),
+                      VariableName :: binary(),
+                      VariableIdentifiers :: ocpp_device_model:variable_identifiers(),
+                      AttributeType :: ocpp_device_model:attribute_type()) ->
+          {ok, any()} | {error, ambiguous | undefined}.
+lookup_variable(StationId, ComponentName, VariableName, VariableIdentifiers, AttributeType) ->
+    gen_statem:call(
+      ?registry(StationId),
+      {lookup_variable,
+       ComponentName,
+       VariableName,
+       VariableIdentifiers,
+       AttributeType}).
 
 -spec stop(Station :: pid()) -> ok.
 stop(Station) ->
@@ -326,6 +342,27 @@ code_change(_OldVsn, _NewVsn, Data) ->
 terminate(_Reason, _State, _Data) ->
     ok.
 
+handle_event({call, From},
+             {lookup_variable, ComponentName, VariableName, VariableIdentifiers, AttributeType},
+             #data{device_model = DeviceModel}) ->
+    Reply =
+        try ocpp_device_model:get_value(DeviceModel,
+                                        ComponentName,
+                                        VariableName,
+                                        VariableIdentifiers,
+                                        AttributeType)
+        of
+            undefined ->
+                {error, undefined};
+            Value ->
+                {ok, Value}
+        catch
+            error:ambiguous ->
+                {error, ambiguous};
+            error:undefined ->
+                {error, undefined}
+        end,
+    {keep_state_and_data, [{reply, From, Reply}]};
 handle_event(cast, {rpcreply, MsgType, MessageId, Message},
      #data{pending_report = {RequestId, MessageId},
            pending_call = {TRef, MessageId}} = Data)
@@ -370,13 +407,18 @@ add_attribute(DeviceModel, ComponentName, VariableName, VariableIdentifiers, Pro
       ComponentName,
       VariableName,
       VariableIdentifiers,
-      proplists:get_value(attribute_type, Properties, 'Actual'),
-      %% XXX (wfv) the empty binary is an
-      %% arbitrary choice for a filler value when
-      %% the variable is write-only
-      proplists:get_value(attribute_value, Properties, <<"">>),
-      proplists:get_value(attribute_mutability, Properties, [read, write]),
-      proplists:get_value(attribute_persistent, Properties, false)).
+      binary_to_atom(proplists:get_value(type, Properties, <<"Actual">>)),
+      proplists:get_value(value, Properties, undefined),
+      proplists:get_value(mutability, Properties, [read, write]),
+      proplists:get_value(persistent, Properties, false)).
+
+add_attributes(DeviceModel, ComponentName, VariableName, VariableIdentifiers, Attributes) ->
+    [true = add_attribute(DeviceModel,
+                          ComponentName,
+                          VariableName,
+                          VariableIdentifiers,
+                          Attribute)
+     || Attribute <- Attributes].
 
 boot_status_to_state(Message) ->
     case ocpp_message:get(<<"status">>, Message) of
@@ -453,17 +495,15 @@ process_report_data(ReportData, DeviceModel) ->
           select_properties(
             Properties,
             [evse, connector, component_instance, variable_instance])),
+    Attributes = proplists:get_value(attributes, Properties),
     try ocpp_device_model:variable_exists(DeviceModel,
                                           ComponentName,
                                           VariableName,
                                           VariableIdentifiers)
     of
         true ->
-            true = add_attribute(DeviceModel,
-                                 ComponentName,
-                                 VariableName,
-                                 VariableIdentifiers,
-                                 Properties);
+            add_attributes(DeviceModel, ComponentName, VariableName,
+                           VariableIdentifiers, Attributes);
         false ->
             true = ocpp_device_model:add_variable(
                      DeviceModel,
@@ -474,11 +514,8 @@ process_report_data(ReportData, DeviceModel) ->
                        select_properties(Properties,
                                          [unit, datatype, minlimit, maxlimit,
                                           valuelist, supports_monitoring]))),
-            true = add_attribute(DeviceModel,
-                                 ComponentName,
-                                 VariableName,
-                                 VariableIdentifiers,
-                                 Properties)
+            add_attributes(DeviceModel, ComponentName, VariableName,
+                           VariableIdentifiers, Attributes)
     catch
         error:ambiguous ->
             logger:error("Skipping report data due to ambiguous variable:~n"
