@@ -375,8 +375,8 @@ handle_event(cast, {rpcreply, MsgType, MessageId, Message},
                 Data#data{pending_report = undefined,
                           expecting_report = [RequestId | Data#data.expecting_report],
                           pending_call = undefined};
-            _ ->
-                %% TODO notify the ocpp_handler that the report was not accepted
+            Status ->
+                ocpp_handler:report_rejected(Data#data.stationid, RequestId, Status),
                 Data#data{pending_report = undefined,
                           pending_call = undefined}
         end,
@@ -483,6 +483,7 @@ process_report(ReportMsg, Data) ->
     if ToBeContinued ->
             Data;
        not ToBeContinued ->
+            ocpp_handler:report_received(Data#data.stationid, RequestId),
             Data#data{expecting_report = lists:delete(RequestId, Data#data.expecting_report)}
     end.
 

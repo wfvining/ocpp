@@ -25,7 +25,7 @@
          station_disconnected/1,
          station_ready/1]).
 %% OCPP events
--export([rpc_request/2, rpc_reply/2]).
+-export([rpc_request/2, rpc_reply/2, report_rejected/3, report_received/2]).
 %% gen_event callbacks
 -export([init/1, handle_event/2, handle_call/2]).
 
@@ -95,6 +95,17 @@ add_handler(StationId, CallbackModule, InitArg, Reason) ->
     gen_event:add_sup_handler(
       ?registry(StationId), ?MODULE,
       {recover, Reason, {StationId, CallbackModule, InitArg}}).
+
+%% @doc Notify the event manager that the station has rejected a
+%% requested report.
+-spec report_rejected(StationId :: binary(), RequestId :: integer(), Reason :: binary()) ->
+          ok.
+report_rejected(StationId, RequestId, Reason) ->
+    gen_event:notify(?registry(StationId), {report_rejected, RequestId, binary_to_atom(Reason)}).
+
+-spec report_received(StationId :: binary(), RequestId :: integer()) -> ok.
+report_received(StationId, RequestId) ->
+    gen_event:notify(?registry(StationId), {report_received, RequestId}).
 
 %% @doc Notify the event manager that an RPC Request has been received.
 %%
