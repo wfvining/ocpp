@@ -364,7 +364,7 @@ handle_event({call, From},
         end,
     {keep_state_and_data, [{reply, From, Reply}]};
 handle_event(cast, {rpcreply, MsgType, MessageId, Message},
-     #data{pending_report = {RequestId, MessageId},
+     #data{pending_report = {MessageId, RequestId},
            pending_call = {TRef, MessageId}} = Data)
   when MsgType =:= 'GetReport';
        MsgType =:= 'GetBaseReport' ->
@@ -414,8 +414,8 @@ add_attribute(DeviceModel, ComponentName, VariableName, VariableIdentifiers, Pro
 
 add_attributes(DeviceModel, ComponentName, VariableName, VariableIdentifiers, Attributes) ->
     [true = add_attribute(DeviceModel,
-                          ComponentName,
-                          VariableName,
+                          binary_to_list(ComponentName),
+                          binary_to_list(VariableName),
                           VariableIdentifiers,
                           Attribute)
      || Attribute <- Attributes].
@@ -437,8 +437,8 @@ call_station(Message, #data{pending_call = undefined} = Data, Timeout) ->
         MessageType
           when MessageType =:= 'GetBaseReport';
                MessageType =:= 'GetReport' ->
-            {ok, NewData#data{pending_report = {ocpp_message:get(<<"requestId">>, Message),
-                                                MessageId}}};
+            {ok, NewData#data{pending_report = {MessageId,
+                                                ocpp_message:get(<<"requestId">>, Message)}}};
         _ ->
             {ok, NewData}
     end;
@@ -492,39 +492,21 @@ process_report_data(ReportData, DeviceModel) ->
     VariableName = ocpp_message:get(<<"variable/name">>, ReportData),
     Properties = report_variable_properties(ReportData),
     VariableIdentifiers =
-        maps:from_list(
-          select_properties(
-            Properties,
-            [evse, connector, component_instance, variable_instance])),
+        select_properties(
+          Properties,
+          [evse, connector, component_instance, variable_instance]),
     Attributes = proplists:get_value(attributes, Properties),
-    try ocpp_device_model:variable_exists(DeviceModel,
-                                          ComponentName,
-                                          VariableName,
-                                          VariableIdentifiers)
-    of
-        true ->
-            add_attributes(DeviceModel, ComponentName, VariableName,
-                           VariableIdentifiers, Attributes);
-        false ->
-            true = ocpp_device_model:add_variable(
-                     DeviceModel,
-                     ComponentName,
-                     VariableName,
-                     VariableIdentifiers,
-                     maps:from_list(
-                       select_properties(Properties,
-                                         [unit, datatype, minlimit, maxlimit,
-                                          valuelist, supports_monitoring]))),
-            add_attributes(DeviceModel, ComponentName, VariableName,
-                           VariableIdentifiers, Attributes)
-    catch
-        error:ambiguous ->
-            logger:error("Skipping report data due to ambiguous variable:~n"
-                         "ComponentName = ~p~n"
-                         "VariableName = ~p~n"
-                         "VariableProperties = ~p~n",
-                         [ComponentName, VariableName, Properties])
-    end.
+    true = ocpp_device_model:add_variable(
+             DeviceModel,
+             binary_to_list(ComponentName),
+             binary_to_list(VariableName),
+             VariableIdentifiers,
+             maps:from_list(
+               select_properties(Properties,
+                                 [unit, datatype, minlimit, maxlimit,
+                                  valuelist, supports_monitoring]))),
+    add_attributes(DeviceModel, ComponentName, VariableName,
+                   VariableIdentifiers, Attributes).
 
 select_properties(Proplist, Keys) ->
     Xs = [proplists:lookup(K, Proplist) || K <- Keys],
@@ -603,18 +585,23 @@ report_variable_properties(ReportData) ->
     ValuesListCSV = ocpp_message:get(<<"variableCharacteristics/valuesList">>, ReportData, nil),
     ValuesList =
         if ValuesListCSV =/= nil ->
-                binary:split(ValuesListCSV, <<",">>, [global]);
+                [binary_to_list(Val) || Val <- binary:split(ValuesListCSV, <<",">>, [global])];
            ValuesListCSV =:= nil ->
                 nil
         end,
     SuppportsMonitoring = ocpp_message:get(<<"variableCharacteristics/supportsMonitoring">>, ReportData),
-    [X || {_, Val} = X <- [{component_instance, ComponentInstance},
+    [if is_binary(Val) -> {Key, binary_to_list(Val)};
+        true -> X
+     end
+     || {Key, Val} = X <- [{component_instance, ComponentInstance},
                            {evse, EVSEId},
                            {connector, ConnectorId},
                            {variable_instance, VariableInstance},
                            {attributes, Attributes},
                            {unit, Unit},
-                           {datatype, DataType},
+                           {datatype, if DataType =:= nil -> DataType;
+                                         DataType =/= nil -> binary_to_atom(DataType)
+                                      end},
                            {minlimit, MinLimit},
                            {maxlimit, MaxLimit},
                            {valuelist, ValuesList},

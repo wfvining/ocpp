@@ -412,18 +412,18 @@ report_idle(Config) ->
                  end),
     {ok, <<"1.5">>} = ocpp_station:lookup_variable(
                         StationId,
-                        <<"Component">>, <<"FOO">>,
-                        #{variable_instance => <<"Baz">>, evse => 1, connector => 1},
+                        "Component", "FOO",
+                        [{variable_instance, "Baz"}, {evse, 1}, {connector, 1}],
                         'Actual'),
     {ok, 1.2} = ocpp_station:lookup_variable(
                   StationId,
-                  <<"Component">>, <<"Foo">>,
-                  #{variable_instance => <<"bar">>, evse => 1, connector => 1},
+                  "Component", "Foo",
+                  [{variable_instance, "bar"}, {evse, 1}, {connector, 1}],
                   'Actual'),
     {ok, 1.0} = ocpp_station:lookup_variable(
                   StationId,
-                  <<"Component">>, <<"Foo">>,
-                  #{variable_instance => <<"bar">>, evse => 1, connector => 1},
+                  "Component", "Foo",
+                  [{variable_instance, "bar"}, {evse, 1}, {connector, 1}],
                   'Target').
 
 multiple_reports() ->

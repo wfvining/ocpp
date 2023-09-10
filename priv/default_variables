@@ -1,0 +1,161 @@
+%% General variables
+{"OCPPCommCtrlr", "ActiveNetworkProfile", [{datatype, integer}]}.
+{"ChargingStation", "AllowNewSessionsPendingFirmwareUpdate", [{datatype, boolean}]}.
+{"OCPPCommCtrlr", "MessageTimeout", [{unit, "s"}, {datatype, boolean}]}.
+{"OCPPCommCtrlr", "FileTransferProtocols", [{datatype, 'MemberList'}]}.
+{"OCPPCommCtrlr", "HeartbeatInterval", [{unit, "s"}, {datatype, integer}]}.
+{"OCPPCommCtrlr", "NetworkConfigurationPriority", [{datatype, 'SequenceList'}]}.
+{"OCPPCommCtrlr", "NetworkProfileConnectionAttempts", [{datatype, integer}]}.
+{"OCPPCommCtrlr", "OfflineThreshold", [{unit, "s"}, {datatype, integer}]}.
+{"OCPPCommCtrlr", "QueueAllMessages", [{datatype, boolean}]}.
+{"OCPPCommCtrlr", {"MessageAttempts", "TransactionEvent"}, [{datatype, integer}]}.
+{"OCPPCommCtrlr", {"MessageAttemptInterval", "TransactionEvent"}, [{unit, "s"}, {datatype, integer}]}.
+{"OCPPCommCtrlr", "UnlockOnEVSideDisconnect", [{datatype, boolean}]}.
+{"OCPPCommCtrlr", "WebSocketPingInterval", [{unit, "s"}, {datatype, integer}]}.
+{"OCPPCommCtrlr", "ResetRetries", [{datatype, integer}]}.
+{"OCPPCommCtrlr", {"FieldLength", any}, [{datatype, integer}]}.
+{"DeviceDataCtrlr", {"ItemsPerMessage", "GetReport"}, [{datatype, integer}]}.
+{"DeviceDataCtrlr", {"ItemsPerMessage", "GetVariables"}, [{datatype, integer}]}.
+{"DeviceDataCtrlr", {"BytesPerMessage", "GetReport"}, [{datatype, integer}]}.
+{"DeviceDataCtrlr", {"BytesPerMessage", "GetVariables"}, [{datatype, integer}]}.
+{"DeviceDataCtrlr", "ConfigurationValueSize", [{datatype, integer}, {maxlimit, 1000}]}.
+{"DeviceDataCtrlr", "ReportingValueSize", [{datatype, integer}, {maxlimit, 2500}]}.
+{"DeviceDataCtrlr", {"ItemsPerMessage", "SetVariables"}, [{datatype, integer}]}.
+{"DeviceDataCtrlr", {"BytesPerMessage", "SetVariables"}, [{datatype, integer}]}.
+{"ClockCtrlr", "DateTime", [{datatype, dateTime}]}.
+{"ClockCtrlr", "NtpSource", [{datatype, 'OptionList'}, {valuelist, ["DHCP", "manual"]}]}.
+{"ClockCtrlr", {"NtpServerUri", any}, [{datatype, string}]}.
+{"ClockCtrlr", "TimeOffset", [{datatype, string}]}.
+{"ClockCtrlr", "NextTimeOffsetTransitionDateTime", [{datatype, dateTime}]}.
+{"ClockCtrlr", {"TimeOffset", "NextTransition"}, [{datatype, string}]}.
+{"ClockCtrlr", "TimeSource", [{datatype, 'SequenceList'},
+                              {valuelist, ["Heartbeat", "NTP", "GPS", "RealTimeClock",
+                                           "MobileNetwork", "RadioTimeTransmitter"]}]}.
+{"ClockCtrlr", "TimeZone", [{datatype, string}]}.
+{"ClockCtrlr", "TimeAdjustmentReportingThreshold", [{datatype, integer}, {unit, "s"}]}.
+{"CustomizationCtrlr", {"CustomImplementationEnabled", any}, [{datatype, boolean}]}.
+%% Security related variables
+{"SecurityCtrlr", "BasicAuthPassword", [{datatype, string}, {maxlimit, 40}]}.
+{"SecurityCtrlr", "Identity", [{datatype, string}, {maxlimit, 48}]}.
+{"SecurityCtrlr", "OrganizationName", [{datatype, string}]}.
+{"SecurityCtrlr", "CertificateEntries", [{datatype, integer}]}.
+{"SecurityCtrlr", "SecurityProfile", [{datatype, integer}]}.
+{"SecurityCtrlr", "AdditionalRootCertificateCheck", [{datatype, boolean}]}.
+{"SecurityCtrlr", "MaxCertificateChainSize", [{datatype, integer}, {maxlimit, 10000}]}.
+{"SecurityCtrlr", "CertSigningWaitMinimum", [{datatype, integer}, {unit, "s"}]}.
+{"SecurityCtrlr", "CertSigningRepeatTimes", [{datatype, integer}]}.
+%% Authorization related variables
+{"AuthCtrlr", "Enabled", [{datatype, boolean}]}.
+{"AuthCtrlr", "AdditionalInfoItemsPerMessage", [{datatype, integer}]}.
+{"AuthCtrlr", "OfflineTxForUnknownIdEnabled", [{datatype, boolean}]}.
+{"AuthCtrlr", "AuthorizeRemoteStart", [{datatype, boolean}]}.
+{"AuthCtrlr", "LocalAuthorizeOffline", [{datatype, boolean}]}.
+{"AuthCtrlr", "LocalPreAuthorize", [{datatype, boolean}]}.
+{"AuthCtrlr", "MasterPassGroupId", [{datatype, string}, {maxlimit, 36}]}.
+{"AuthCtrlr", "DisableRemoteAuthorization", [{datatype, boolean}]}.
+{"AuthCacheCtrlr", "Enabled", [{datatype, boolean}]}.
+{"AuthCacheCtrlr", "Available", [{datatype, boolean}]}.
+{"AuthCacheCtrlr", "LifeTime", [{datatype, integer}, {unit, "s"}]}.
+{"AuthCacheCtrlr", "Storage", [{datatype, integer}]}.
+{"AuthCacheCtrlr", "Policy", [{datatype, 'OptionList'}, {valuelist, ["LRU", "LFU", "FIFO", "CUSTOM"]}]}.
+{"AuthCacheCtrlr", "DisablePostAuthorize", [{datatype, boolean}]}.
+%% Local authorization list management related variables
+{"LocalAuthListCtrlr", "Enabled", [{datatype, boolean}]}.
+{"LocalAuthListCtrlr", "Entries", [{datatype, integer}]}.
+{"LocalAuthListCtrlr", "Available", [{datatype, boolean}]}.
+{"LocalAuthListCtrlr", "ItemsPerMessage", [{datatype, integer}]}.
+{"LocalAuthListCtrlr", "BytesPerMessage", [{datatype, integer}]}.
+{"LocalAuthListCtrlr", "Storage", [{datatype, integer}]}.
+{"LocalAuthListCtrlr", "DisablePostAuthorize", [{datatype, boolean}]}.
+%% Transaction related variables
+{"TxCtrlr", "EVConnectionTimeOut", [{unit, "s"}, {datatype, integer}]}.
+{"TxCtrlr", "StopTxOnEVSideDisconnect", [{datatype, boolean}]}.
+{"TxCtrlr", "TxBeforeAcceptedEnabled", [{datatype, boolean}]}.
+{"TxCtrlr", "TxStartPoint", [{datatype, 'MemberList'},
+                             {valuelist, ["ParkingBayOccupancy", "Authorized", "PowerPathClosed",
+                                          "EnergyTransfer", "DataSigned"]}]}.
+{"TxCtrlr", "TxStopPoint", [{datatype, 'MemberList'},
+                            {valuelist, ["ParkingBayOccupancy", "Authorized", "PowerPathClosed",
+                                         "EnergyTransfer", "DataSigned"]}]}.
+{"TxCtrlr", "MaxEnergyOnInvalidId", [{datatype, integer}, {unit, "Wh"}]}.
+{"TxCtrlr", "StopTxOnInvalidId", [{datatype, boolean}]}.
+{"SampledDataCtrlr", "Enabled", [{datatype, boolean}]}.
+{"SampledDataCtrlr", "Available", [{datatype, boolean}]}.
+{"SampledDataCtrlr", "SignReadings", [{datatype, boolean}]}.
+{"SampledDataCtrlr", "TxEndedMeasurands", [{datatype, 'MemberList'}]}.
+{"SampledDataCtrlr", "TxEndedInterval", [{datatype, integer}, {unit, "s"}]}.
+{"SampledDataCtrlr", "TxStartedMeasurands", [{datatype, 'MemberList'}]}.
+{"SampledDataCtrlr", "TxStartedInterval", [{datatype, integer}, {unit, "s"}]}.
+{"SampledDataCtrlr", "TxUpdatedMeasurands", [{datatype, 'MemberList'}]}.
+{"SampledDataCtrlr", "TxUpdatedInterval", [{datatype, integer}, {unit, "s"}]}.
+{"SampledDataCtrlr", "RegisterValuesWithoutPhases", [{datatype, boolean}]}.
+{"AlignedDataCtrlr", "Enabled", [{datatype, boolean}]}.
+{"AlignedDataCtrlr", "Available", [{datatype, boolean}]}.
+{"AlignedDataCtrlr", "AlignedDataMeasurands", [{datatype, 'MemberList'}]}.
+{"AlignedDataCtrlr", "Interval", [{datatype, integer}, {unit, "s"}]}.
+{{"AlignedDataCtrlr", any}, "SendDuringIdle", [{datatype, boolean}]}.
+{"AlignedDataCtrlr", "SignReadings", [{datatype, boolean}]}.
+{"AlignedDataCtrlr", "TxEndedMeasurands", [{datatype, 'MemberList'}]}.
+{"AlignedDataCtrlr", "TxEndedInterval", [{datatype, integer}, {unit, "s"}]}.
+{"OCPPCommCtrlr", "PublicKeyWithSignedMeterValue", [{datatype, 'OptionList'},
+                                                    {valuelist, ["Never", "OncePerTransaction",
+                                                                 "EveryMeterValue"]}]}.
+%% Reservation related variables
+{"ReservationCtrlr", "Enabled", [{datatype, boolean}]}.
+{"ReservationCtrlr", "Available", [{datatype, boolean}]}.
+{"ReservationCtrlr", "NonEvseSpecific", [{datatype, boolean}]}.
+%% Smart Charging related variables
+{"SmartChargingCtrlr", "Enabled", [{datatype, boolean}]}.
+{"SmartChargingCtrlr", "Available", [{datatype, boolean}]}.
+{"SmartChargingCtrlr", "ACPhaseSwitchingSupported", [{datatype, boolean}]}.
+{"SmartChargingCtrlr", "ProfileStackLevel", [{datatype, integer}]}.
+{"SmartChargingCtrlr", "RateUnit", [{datatype, 'MemberList'}, {valuelist, ["A", "W"]}]}.
+{"SmartChargingCtrlr", "PeriodsPerSchedule", [{datatype, integer}]}.
+{"SmartChargingCtrlr", "ExternalControlSignalsEnabled", [{datatype, boolean}]}.
+{"SmartChargingCtrlr", "NotifyChargingLimitWithSchedules", [{datatype, boolean}]}.
+{"SmartChargingCtrlr", "Phases3to1", [{datatype, boolean}]}.
+{"SmartChargingCtrlr", "Entries", [{datatype, integer}]}.
+{"SmartChargingCtrlr", "LimitChangeSignificance", [{datatype, decimal}]}.
+%% Tariff & Cost related variables
+{"TariffCostCtrlr", "Enabled", [{datatype, boolean}]}.
+{"TariffCostCtrlr", "Available", [{datatype, boolean}]}.
+{"TariffCostCtrlr", "TariffFallbackMessage", [{datatype, string}, {maxlimit, 255}]}.
+{"TariffCostCtrlr", {"Enabled", "Cost"}, [{datatype, boolean}]}.
+{"TariffCostCtrlr", {"Available", "Cost"}, [{datatype, boolean}]}.
+{"TariffCostCtrlr", "TotalCostFallbackMessage", [{datatype, string}, {maxlimit, 255}]}.
+{"TariffCostCtrlr", "Currency", [{datatype, string}, {maxlimit, 3}]}.
+%% Diagnostics related variables
+{"MonitoringCtrlr", "Enabled", [{datatype, boolean}]}.
+{"MonitoringCtrlr", "Available", [{datatype, boolean}]}.
+{"MonitoringCtrlr", {"ItemsPerMessage", "ClearVariableMonitoring"}, [{datatype, integer}]}.
+{"MonitoringCtrlr", {"ItemsPerMessage", "SetVariableMonitoring"}, [{datatype, integer}]}.
+{"MonitoringCtrlr", {"BytesPerMessage", "ClearVariableMonitoring"}, [{datatype, integer}]}.
+{"MonitoringCtrlr", {"BytesPerMessage", "SetVariableMonitoring"}, [{datatype, integer}]}.
+{"MonitoringCtrlr", "OfflineQueuingSeverity", [{datatype, integer}]}.
+{"MonitoringCtrlr", "ActiveMonitoringBase", [{datatype, 'OptionList'}]}.
+{"MonitoringCtrlr", "ActiveMonitoringLevel", [{datatype, integer}]}.
+%% Display Message related variables
+{"DisplayMessageCtrlr", "Enabled", [{datatype, boolean}]}.
+{"DisplayMessageCtrlr", "Available", [{datatype, boolean}]}.
+{"DisplayMessageCtrlr", "DisplayMessages", [{datatype, integer}]}.
+{"DisplayMessageCtrlr", "SupportedFormats", [{datatype, 'MemberList'}]}.
+{"DisplayMessageCtrlr", "SupportedPriorities", [{datatype, 'MemberList'}]}.
+%% Charging Infrastructure related variable
+{{"ChargingStation", any, any}, "Available", [{datatype, boolean}]}.
+{{"EVSE", any, any}, "Available", [{datatype, boolean}]}.
+{{"Connector", any, any}, "Available", [{datatype, boolean}]}.
+{{"ChargingStation", any}, "AvailabilityState", [{datatype, 'OptionList'},
+                                                 {valuelist, ["Available", "Occupied",
+                                                              "Reserved", "Unavailable",
+                                                              "Faulted"]}]}.
+{{"EVSE", any}, "AvailabilityState", [{datatype, 'OptionList'},
+                                      {valuelist, ["Available", "Occupied",
+                                                   "Reserved", "Unavailable",
+                                                   "Faulted"]}]}.
+{{"EVSE", any}, "AllowReset", [{datatype, boolean}]}.
+{{"Connector", any, any}, "ConnectorType", [{datatype, string}]}.
+{{any, any, any}, "PhaseRotation", [{datatype, string}]}. %% a PhaseRotation variable can exist for every component
+{{"ChargingStation", any, any}, "SupplyPhases", [{datatype, integer}]}.
+{{"EVSE", any, any}, "SupplyPhases", [{datatype, integer}]}.
+{{"Connector", any, any}, "SupplyPhases", [{datatype, integer}]}.
+{{"EVSE", any, any}, "Power", [{datatype, decimal}]}.

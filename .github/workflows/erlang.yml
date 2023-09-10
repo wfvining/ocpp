@@ -9,12 +9,16 @@ on:
 permissions:
   contents: read
 
+env:
+  # enable maybe expressions
+  ERL_AFLAGS: -enable-feature all
+
 jobs:
 
   build:
     strategy:
       matrix:
-        erlvsn: [24, 25, 26]
+        erlvsn: [25, 26]
 
     runs-on: ubuntu-latest
 

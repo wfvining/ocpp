@@ -4,10 +4,14 @@
 %%% Copyright (c) 2023 Will Vining <wfv@vining.dev>
 -module(ocpp_device_model).
 
--export([new/0, add_variable/5, add_attribute/8, variable_exists/4, get_value/5]).
+-feature(maybe_expr, enable).
+
+-export([new/0, add_variable/5, add_attribute/8, get_value/5]).
 
 -export_type([device_model/0, attribute/0, charactersitics/0,
               variable_identifiers/0, attribute_type/0]).
+
+-include_lib("stdlib/include/ms_transform.hrl").
 
 -type attribute_type() :: ocpp_message:attribute_type().
 -type attribute() ::
@@ -21,10 +25,10 @@
       minlimit => any(),
       supports_monitoring := boolean(),
       datatype := ocpp_message:data_type(),
-      valuelist => [binary()]}.
+      valuelist => [string()]}.
 -type variable_identifiers() ::
-    #{component_instance => binary(),
-      variable_instance => binary(),
+    #{component_instance => string(),
+      variable_instance => string(),
       evse => pos_integer(),
       connector => pos_integer()}.
 
@@ -36,37 +40,118 @@
 
 -spec new() -> device_model().
 new() ->
-    #device_model{}.
+    M = #device_model{},
+    add_defaults(M#device_model.characteristics),
+    M.
+
+add_defaults(Characteristics) ->
+    Defaults = default_variable_characteristics(),
+    lists:foreach(
+      fun (Var) ->
+              ets:insert(Characteristics, make_characteristics(Var))
+      end, Defaults).
+
+make_characteristics({Component, Variable, Characteristics}) ->
+    {prepare_component(Component), prepare_variable(Variable), maps:from_list(Characteristics)}.
+
+uppercase(X) when is_atom(X) ->
+    X;
+uppercase(X) when is_list(X) ->
+    string:uppercase(X).
+
+prepare_component({Name, EVSE, Connector, Instance}) ->
+    {uppercase(Name), EVSE, Connector, uppercase(Instance)};
+prepare_component({Name, EVSE, Connector}) ->
+    {uppercase(Name), EVSE, Connector, none};
+prepare_component({Name, EVSE}) ->
+    {uppercase(Name), EVSE, none, none};
+prepare_component(Name) ->
+    {uppercase(Name), none, none, none}.
+
+prepare_variable({Name, Instance}) ->
+    {uppercase(Name), uppercase(Instance)};
+prepare_variable(Name) ->
+    {uppercase(Name), none}.
+
+characteristics(#device_model{characteristics = Characteristics},
+                ComponentName, VariableName, Options) ->
+    EVSE = proplists:get_value(evse, Options, none),
+    Connector = proplists:get_value(connector, Options, none),
+    VarInstance = uppercase(proplists:get_value(variable_instance, Options, none)),
+    CompInstance = uppercase(proplists:get_value(component_instance, Options, none)),
+    CompName = uppercase(ComponentName),
+    VarName = uppercase(VariableName),
+    maybe
+        [] ?= ets:match(Characteristics, {{CompName, EVSE, Connector, CompInstance}, {VarName, VarInstance}, '$1'}),
+        [] ?= ets:match(Characteristics, {{CompName, EVSE, Connector, CompInstance}, {VarName, any}, '$1'}),
+
+        [] ?= ets:match(Characteristics, {{CompName, EVSE, Connector, any}, {VarName, VarInstance}, '$1'}),
+        [] ?= ets:match(Characteristics, {{CompName, EVSE, Connector, any}, {VarName, any}, '$1'}),
+
+        [] ?= ets:match(Characteristics, {{CompName, EVSE, any, CompInstance}, {VarName, VarInstance}, '$1'}),
+        [] ?= ets:match(Characteristics, {{CompName, EVSE, any, CompInstance}, {VarName, any}, '$1'}),
+
+        [] ?= ets:match(Characteristics, {{CompName, EVSE, any, any}, {VarName, VarInstance}, '$1'}),
+        [] ?= ets:match(Characteristics, {{CompName, EVSE, any, any}, {VarName, any}, '$1'}),
+
+        [] ?= ets:match(Characteristics, {{CompName, any, Connector, CompInstance}, {VarName, VarInstance}, '$1'}),
+        [] ?= ets:match(Characteristics, {{CompName, any, Connector, CompInstance}, {VarName, any}, '$1'}),
+
+        [] ?= ets:match(Characteristics, {{CompName, any, Connector, any}, {VarName, VarInstance}, '$1'}),
+        [] ?= ets:match(Characteristics, {{CompName, any, Connector, any}, {VarName, any}, '$1'}),
+
+        [] ?= ets:match(Characteristics, {{CompName, any, any, CompInstance}, {VarName, VarInstance}, '$1'}),
+        [] ?= ets:match(Characteristics, {{CompName, any, any, CompInstance}, {VarName, any}, '$1'}),
+
+        [] ?= ets:match(Characteristics, {{CompName, any, any, any}, {VarName, VarInstance}, '$1'}),
+        [] ?= ets:match(Characteristics, {{CompName, any, any, any}, {VarName, any}, '$1'}),
+
+        [] ?= ets:match(Characteristics, {{any, any, any, CompInstance}, {VarName, VarInstance}, '$1'}),
+        [] ?= ets:match(Characteristics, {{any, any, any, CompInstance}, {VarName, any}, '$1'}),
+
+        {error, undefined}
+    else
+        Matches when length(Matches) > 1 -> {error, ambiguous};
+        [[VarCharacteristics]] -> {ok, VarCharacteristics}
+    end.
+
 
 %% @doc Add a variable to the device model by specifying its
 %% characteristics. If the variable already exists `false' is
 %% returned, otherwise returns `true'.
 -spec add_variable(DeviceModel :: device_model(),
-                   ComponentName :: binary(),
-                   VariableName :: binary(),
-                   VariableIdentifiers :: variable_identifiers(),
+                   ComponentName :: string(),
+                   VariableName :: string(),
+                   VariableIdentifiers :: [OptionalIdentifier],
                    Characteristics :: charactersitics()) ->
-                      boolean().
+          boolean()
+              when OptionalIdentifier :: {evse, pos_integer()} |
+                                         {connector, pos_integer()} |
+                                         {variable_instance, string()} |
+                                         {component_instance, string()}.
 add_variable(DeviceModel,
              ComponentName,
              VariableName,
              VariableIdentifiers,
              Characteristics) ->
+    Component = make_component_identifier(ComponentName, VariableIdentifiers),
+    Variable = make_variable_identifier(VariableName, VariableIdentifiers),
     ets:insert(DeviceModel#device_model.characteristics,
-               {string:uppercase(ComponentName),
-                string:uppercase(VariableName),
-                uppercase_identifiers(VariableIdentifiers),
-                Characteristics}).
+               {Component, Variable, Characteristics}).
 
 -spec add_attribute(DeviceModel :: device_model(),
-                    ComponentName :: binary(),
-                    VariableName :: binary(),
-                    VariableIdentifiers :: variable_identifiers(),
+                    ComponentName :: string(),
+                    VariableName :: string(),
+                    VariableIdentifiers :: [OptionalIdentifier],
                     AttributeType :: attribute_type(),
                     AttributeValue :: binary() | undefined,
                     Mutability :: [read | write],
                     Persistent :: boolean()) ->
-                       boolean().
+          boolean()
+              when OptionalIdentifier :: {evse, pos_integer()} |
+                                         {connector, pos_integer()} |
+                                         {variable_instance, string()} |
+                                         {component_instance, string()}.
 add_attribute(DeviceModel,
               ComponentName,
               VariableName,
@@ -77,58 +162,50 @@ add_attribute(DeviceModel,
               Persistent) ->
     Type = get_type(DeviceModel, ComponentName, VariableName, VariableIdentifiers),
     Value = parse_value(Type, AttributeValue),
+    Component = make_component_identifier(ComponentName, VariableIdentifiers),
+    Variable = make_variable_identifier(VariableName, VariableIdentifiers),
     ets:insert(DeviceModel#device_model.attributes,
-               {string:uppercase(ComponentName),
-                string:uppercase(VariableName),
-                uppercase_identifiers(VariableIdentifiers),
-                AttributeType,
-                Value,
-                Mutability,
-                Persistent}).
+               {Component, Variable, AttributeType, Value, Mutability, Persistent}).
 
-uppercase_identifiers(VariableIdentifiers) ->
-    uppercase_keys([variable_instance, component_instance], VariableIdentifiers).
+make_component_identifier(Name, Options) ->
+    {uppercase(Name),
+     proplists:get_value(evse, Options, none),
+     proplists:get_value(connector, Options, none),
+     uppercase(proplists:get_value(component_instance, Options, none))}.
 
-uppercase_keys(Keys, Map) ->
-    lists:foldl(fun(Key, Acc) -> uppercase_if_exists(Key, Acc) end, Map, Keys).
+make_variable_identifier(Name, Options) ->
+    {uppercase(Name), uppercase(proplists:get_value(variable_instance, Options, none))}.
 
-uppercase_if_exists(Key, Map) ->
-    case maps:is_key(Key, Map) of
-        true -> Map#{Key => string:uppercase(maps:get(Key, Map))};
-        false -> Map
-    end.
-
-get_type(DeviceModel, ComponentName, VariableName, VariableIdentifiers) ->
-    case ets:match(DeviceModel#device_model.characteristics,
-                   {string:uppercase(ComponentName),
-                    string:uppercase(VariableName),
-                    uppercase_identifiers(VariableIdentifiers),
-                    '$1'})
-    of
-        [[Characteristics]] ->
+get_type(DeviceModel, ComponentName, VariableName, Options) ->
+    case characteristics(DeviceModel, ComponentName, VariableName, Options) of
+        {ok, Characteristics} ->
             maps:get(datatype, Characteristics);
-        [] -> error(undefined);
-        _ -> error(ambiguous)
+        {error, Reason} -> error(Reason)
     end.
 
 %% @doc Return the value of the attribute of the given variable. If
 %% the variable or attribute is undefined the call fails with reason `undefined'.
 %% If the specified variable is ambiguous the call fails with reason `ambiguous'.
 -spec get_value(DeviceModel :: device_model(),
-                ComponentName :: binary(),
-                VariableName :: binary(),
-                VariableIdentifiers :: variable_identifiers(),
+                ComponentName :: string(),
+                VariableName :: string(),
+                VariableIdentifiers :: [OptionalIdentifier],
                 AttributeType :: attribute_type()) ->
-          any().
+          any()
+              when OptionalIdentifier :: {evse, pos_integer()} |
+                                         {connector, pos_integer()} |
+                                         {variable_instance, string()} |
+                                         {component_instance, string()}.
 get_value(#device_model{attributes = Attributes},
           ComponentName,
           VariableName,
           VariableIdentifiers,
           AttributeType) ->
+    Component = make_component_identifier(ComponentName, VariableIdentifiers),
+    Variable = make_variable_identifier(VariableName, VariableIdentifiers),
     case ets:match(Attributes,
-                   {string:uppercase(ComponentName),
-                    string:uppercase(VariableName),
-                    uppercase_identifiers(VariableIdentifiers),
+                   {Component,
+                    Variable,
                     AttributeType,
                     '$1', '_', '_'})
     of
@@ -139,38 +216,25 @@ get_value(#device_model{attributes = Attributes},
 
 parse_value(_, undefined) ->
     undefined;
-parse_value(<<"string">>, Value) ->
+parse_value(string, Value) ->
     Value;
-parse_value(<<"decimal">>, Value) ->
+parse_value(decimal, Value) ->
     binary_to_float(Value);
-parse_value(<<"integer">>, Value) ->
+parse_value(integer, Value) ->
     binary_to_integer(Value);
-parse_value(<<"dateTime">>, Value) ->
+parse_value(dateTime, Value) ->
     calendar:rfc3339_to_system_time(Value);
-parse_value(<<"boolean">>, <<"true">>) ->
+parse_value(boolean, <<"true">>) ->
     true;
-parse_value(<<"boolean">>, <<"false">>) ->
+parse_value(boolean, <<"false">>) ->
     false;
+%% TODO parse OptionList/MemberList/SequenceList into lists of strings
 parse_value(_, Value) ->
     Value.
 
-%% @doc Returns true if the identified variable exists in the device
-%% model. If the `ComponentName', `VariableName', and
-%% `VariableIdentifiers' match more than one variable the call fails
-%% with reason `ambiguous'.
--spec variable_exists(DeviceModel :: device_model(),
-                      ComponentName :: binary(),
-                      VariableName :: binary(),
-                      VariableIdentifiers :: variable_identifiers()) -> boolean().
-variable_exists(#device_model{characteristics = Characteristics},
-                ComponentName, VariableName, VariableIdentifiers) ->
-    case ets:match_object(Characteristics,
-                          {string:uppercase(ComponentName),
-                           string:uppercase(VariableName),
-                           uppercase_identifiers(VariableIdentifiers),
-                           '_'})
-    of
-        [] -> false;
-        [_Var] -> true;
-        _ -> error(ambiguous)
-    end.
+default_variable_characteristics() ->
+    VarDefs =
+        application:get_env(ocpp, variable_defs_path,
+                            filename:join(code:priv_dir(ocpp), "default_variables")),
+    {ok, Defs} = file:consult(VarDefs),
+    Defs.
