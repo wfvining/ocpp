@@ -33,8 +33,8 @@
       connector => pos_integer()}.
 
 -record(device_model,
-        {characteristics = ets:new(characteristics, [bag, private, {keypos, 2}]) :: ets:table(),
-         attributes = ets:new(attributes, [bag, private, {keypos, 2}]) :: ets:table()}).
+        {characteristics = ets:new(characteristics, [set, private]) :: ets:table(),
+         attributes = ets:new(attributes, [set, private]) :: ets:table()}).
 
 -opaque device_model() :: #device_model{}.
 
@@ -52,7 +52,7 @@ add_defaults(Characteristics) ->
       end, Defaults).
 
 make_characteristics({Component, Variable, Characteristics}) ->
-    {prepare_component(Component), prepare_variable(Variable), maps:from_list(Characteristics)}.
+    {{prepare_component(Component), prepare_variable(Variable)}, maps:from_list(Characteristics)}.
 
 uppercase(X) when is_atom(X) ->
     X;
@@ -82,32 +82,32 @@ characteristics(#device_model{characteristics = Characteristics},
     CompName = uppercase(ComponentName),
     VarName = uppercase(VariableName),
     maybe
-        [] ?= ets:match(Characteristics, {{CompName, EVSE, Connector, CompInstance}, {VarName, VarInstance}, '$1'}),
-        [] ?= ets:match(Characteristics, {{CompName, EVSE, Connector, CompInstance}, {VarName, any}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{CompName, EVSE, Connector, CompInstance}, {VarName, VarInstance}}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{CompName, EVSE, Connector, CompInstance}, {VarName, any}}, '$1'}),
 
-        [] ?= ets:match(Characteristics, {{CompName, EVSE, Connector, any}, {VarName, VarInstance}, '$1'}),
-        [] ?= ets:match(Characteristics, {{CompName, EVSE, Connector, any}, {VarName, any}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{CompName, EVSE, Connector, any}, {VarName, VarInstance}}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{CompName, EVSE, Connector, any}, {VarName, any}}, '$1'}),
 
-        [] ?= ets:match(Characteristics, {{CompName, EVSE, any, CompInstance}, {VarName, VarInstance}, '$1'}),
-        [] ?= ets:match(Characteristics, {{CompName, EVSE, any, CompInstance}, {VarName, any}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{CompName, EVSE, any, CompInstance}, {VarName, VarInstance}}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{CompName, EVSE, any, CompInstance}, {VarName, any}}, '$1'}),
 
-        [] ?= ets:match(Characteristics, {{CompName, EVSE, any, any}, {VarName, VarInstance}, '$1'}),
-        [] ?= ets:match(Characteristics, {{CompName, EVSE, any, any}, {VarName, any}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{CompName, EVSE, any, any}, {VarName, VarInstance}}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{CompName, EVSE, any, any}, {VarName, any}}, '$1'}),
 
-        [] ?= ets:match(Characteristics, {{CompName, any, Connector, CompInstance}, {VarName, VarInstance}, '$1'}),
-        [] ?= ets:match(Characteristics, {{CompName, any, Connector, CompInstance}, {VarName, any}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{CompName, any, Connector, CompInstance}, {VarName, VarInstance}}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{CompName, any, Connector, CompInstance}, {VarName, any}}, '$1'}),
 
-        [] ?= ets:match(Characteristics, {{CompName, any, Connector, any}, {VarName, VarInstance}, '$1'}),
-        [] ?= ets:match(Characteristics, {{CompName, any, Connector, any}, {VarName, any}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{CompName, any, Connector, any}, {VarName, VarInstance}}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{CompName, any, Connector, any}, {VarName, any}}, '$1'}),
 
-        [] ?= ets:match(Characteristics, {{CompName, any, any, CompInstance}, {VarName, VarInstance}, '$1'}),
-        [] ?= ets:match(Characteristics, {{CompName, any, any, CompInstance}, {VarName, any}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{CompName, any, any, CompInstance}, {VarName, VarInstance}}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{CompName, any, any, CompInstance}, {VarName, any}}, '$1'}),
 
-        [] ?= ets:match(Characteristics, {{CompName, any, any, any}, {VarName, VarInstance}, '$1'}),
-        [] ?= ets:match(Characteristics, {{CompName, any, any, any}, {VarName, any}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{CompName, any, any, any}, {VarName, VarInstance}}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{CompName, any, any, any}, {VarName, any}}, '$1'}),
 
-        [] ?= ets:match(Characteristics, {{any, any, any, CompInstance}, {VarName, VarInstance}, '$1'}),
-        [] ?= ets:match(Characteristics, {{any, any, any, CompInstance}, {VarName, any}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{any, any, any, CompInstance}, {VarName, VarInstance}}, '$1'}),
+        [] ?= ets:match(Characteristics, {{{any, any, any, CompInstance}, {VarName, any}}, '$1'}),
 
         {error, undefined}
     else
@@ -137,7 +137,7 @@ add_variable(DeviceModel,
     Component = make_component_identifier(ComponentName, VariableIdentifiers),
     Variable = make_variable_identifier(VariableName, VariableIdentifiers),
     ets:insert(DeviceModel#device_model.characteristics,
-               {Component, Variable, Characteristics}).
+               {{Component, Variable}, Characteristics}).
 
 -spec add_attribute(DeviceModel :: device_model(),
                     ComponentName :: string(),
@@ -165,7 +165,7 @@ add_attribute(DeviceModel,
     Component = make_component_identifier(ComponentName, VariableIdentifiers),
     Variable = make_variable_identifier(VariableName, VariableIdentifiers),
     ets:insert(DeviceModel#device_model.attributes,
-               {Component, Variable, AttributeType, Value, Mutability, Persistent}).
+               {{Component, Variable, AttributeType}, Value, Mutability, Persistent}).
 
 make_component_identifier(Name, Options) ->
     {uppercase(Name),
@@ -204,9 +204,9 @@ get_value(#device_model{attributes = Attributes},
     Component = make_component_identifier(ComponentName, VariableIdentifiers),
     Variable = make_variable_identifier(VariableName, VariableIdentifiers),
     case ets:match(Attributes,
-                   {Component,
-                    Variable,
-                    AttributeType,
+                   {{Component,
+                     Variable,
+                     AttributeType},
                     '$1', '_', '_'})
     of
         [[Value]] -> Value;
