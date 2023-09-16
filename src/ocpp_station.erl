@@ -346,16 +346,13 @@ handle_event({call, From},
              {lookup_variable, ComponentName, VariableName, VariableIdentifiers, AttributeType},
              #data{device_model = DeviceModel}) ->
     Reply =
-        try ocpp_device_model:get_value(DeviceModel,
-                                        ComponentName,
-                                        VariableName,
-                                        VariableIdentifiers,
-                                        AttributeType)
-        of
-            undefined ->
-                {error, undefined};
-            Value ->
-                {ok, Value}
+        try
+            Value = ocpp_device_model:get_value(DeviceModel,
+                                                ComponentName,
+                                                VariableName,
+                                                VariableIdentifiers,
+                                                AttributeType),
+            {ok, Value}
         catch
             error:ambiguous ->
                 {error, ambiguous};
@@ -363,9 +360,14 @@ handle_event({call, From},
                 {error, undefined}
         end,
     {keep_state_and_data, [{reply, From, Reply}]};
+handle_event(cast, {rpcreply, 'GetVariables', _MessageId, Message}, Data) ->
+    lists:foreach(
+      fun (GetVariableResult) -> process_get_variable(GetVariableResult, Data) end,
+      ocpp_message:get(<<"getVariableResult">>, Message)),
+    keep_state_and_data;
 handle_event(cast, {rpcreply, MsgType, MessageId, Message},
-     #data{pending_report = {MessageId, RequestId},
-           pending_call = {TRef, MessageId}} = Data)
+             #data{pending_report = {MessageId, RequestId},
+                   pending_call = {TRef, MessageId}} = Data)
   when MsgType =:= 'GetReport';
        MsgType =:= 'GetBaseReport' ->
     timer:cancel(TRef),
@@ -453,7 +455,20 @@ cleanup_connection(#data{connection = {_, Ref}} = Data) ->
 clear_pending_request(Data) ->
     Data#data{pending = undefined}.
 
+component_options(Component) ->
+    lists:flatten([get_optional(<<"instance">>, component_instance, Component),
+                   get_optional(<<"evse/id">>, evse, Component),
+                   get_optional(<<"evse/connectorId">>, connector, Component)]).
+
 connection_pid(#data{connection = {Pid, _Ref}}) -> Pid.
+
+get_optional(Property, Key, Object) ->
+    Value = ocpp_message:get(Property, Object, nil),
+    if Value =:= nil ->
+            [];
+       Value =/= nil ->
+            [{Key, Value}]
+    end.
 
 heartbeat_response(MessageId) ->
     ocpp_message:new_response(
@@ -471,6 +486,28 @@ handle_rpccall(Message, Data) ->
 
 init_evse(EVSE) ->
     maps:from_list(lists:zip(lists:seq(1, length(EVSE)), EVSE)).
+
+process_get_variable(GetVariableResult, Data) ->
+    case ocpp_message:get(<<"attributeStatus">>, GetVariableResult) of
+        <<"Accepted">> ->
+            ComponentName = ocpp_message:get(<<"component/name">>, GetVariableResult),
+            ComponentOptions = component_options(ocpp_message:get(<<"component">>, GetVariableResult)),
+            VariableName = ocpp_message:get(<<"variable/name">>, GetVariableResult),
+            AttributeType = ocpp_message:get(<<"attributeType">>, GetVariableResult),
+            AttributeValue = ocpp_message:get(<<"attributeValue">>, GetVariableResult),
+            VariableOptions = get_optional(<<"variable/instance">>, variable_instance, GetVariableResult),
+            Options = ComponentOptions ++ VariableOptions,
+            ocpp_device_model:add_attribute(
+              Data#data.device_model,
+              binary_to_list(ComponentName),
+              binary_to_list(VariableName),
+              Options,
+              binary_to_atom(AttributeType),
+              AttributeValue,
+              [read, write], %% TODO
+              false); %% TODO
+        _ -> ok
+    end.
 
 process_report(ReportMsg, Data) ->
     ReportData = ocpp_message:get(<<"reportData">>, ReportMsg, []),

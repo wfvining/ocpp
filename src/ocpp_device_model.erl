@@ -216,6 +216,8 @@ get_value(#device_model{attributes = Attributes},
 
 parse_value(_, undefined) ->
     undefined;
+parse_value(_, <<"">>) ->
+    undefined;
 parse_value(string, Value) ->
     Value;
 parse_value(decimal, Value) ->

@@ -119,6 +119,13 @@ init_per_testcase(report_idle, Config) ->
     provision_idle(StationId),
     Config1;
 init_per_testcase(Case, Config)
+  when Case =:= get_variables ->
+    StationId = ?stationid(Case),
+    Config1 = start_station(StationId, Config),
+    ok = ocpp_station:connect(StationId),
+    boot_station(StationId, <<"Pending">>),
+    Config1;
+init_per_testcase(Case, Config)
   when Case =:= offline_reboot;
        Case =:= offline_reconnect ->
     StationId = ?stationid(Case),
@@ -178,7 +185,8 @@ groups() ->
       [report_pending,
        report_idle,
        multiple_reports,
-       report_rejected]}].
+       report_rejected,
+       get_variables]}].
 
 %%--------------------------------------------------------------------
 %% @spec all() -> GroupsAndTestCases | {skip,Reason}
@@ -460,6 +468,52 @@ report_rejected(Config) ->
     ok = ocpp_station:rpccall(StationId, ReportNotification),
     receive_ocpp(ocpp_message:id(ReportNotification), rpcerror,
                  fun(Msg) -> ocpp_error:code(Msg) =:= <<"SecurityError">> end).
+
+get_variables() ->
+    [{doc, "when variables are requested from a charging station the "
+           "station device model is updated."},
+     {timetrap, 5000}].
+get_variables(Config) ->
+    StationId = ?config(stationid, Config),
+    GetVariablesRequest =
+        ocpp_message:new_request('GetVariables',
+                                 #{getVariableData => [#{attributeType => 'Actual',
+                                                         component => #{name => <<"OCPPCommCtrlr">>},
+                                                         variable => #{name => <<"WebsocketPingInterval">>}},
+                                                       #{attributeType => 'Actual',
+                                                         component => #{name => <<"Connector">>,
+                                                                        evse => #{id => 1, connectorId => 2}},
+                                                         variable => #{name => <<"AvailabilityState">>}},
+                                                       #{attributeType => 'Target',
+                                                         component => #{name => <<"EVSE">>,
+                                                                        evse => #{id => 1, connectorId => 1}},
+                                                         variable => #{name => <<"Power">>}}]}),
+    ocpp_station:call(StationId, GetVariablesRequest),
+    receive_ocpp(ocpp_message:id(GetVariablesRequest), rpccall,
+                 fun(Msg) -> ocpp_message:request_type(Msg) =:= 'GetVariables' end),
+    GetVariablesResponse =
+        ocpp_message:new_response(
+          'GetVariables',
+          #{getVariableResult => [#{attributeStatus => <<"Accepted">>,
+                                    attributeType => 'Actual',
+                                    attributeValue => <<"120">>,
+                                    component => #{name => <<"OCPPCommCtrlr">>},
+                                    variable => #{name => <<"WebSocketPingInterval">>}},
+                                  #{attributeStatus => <<"UnknownComponent">>,
+                                    attributeType => 'Actual',
+                                    component => #{name => <<"Connector">>, evse => #{id => 1, connectorId => 2}},
+                                    variable => #{name => <<"AvailabilityState">>}},
+                                  #{attributeStatus => <<"Accepted">>,
+                                    attributeType => 'Target',
+                                    attributeValue => <<"">>,
+                                    component => #{name => <<"EVSE">>, evse => #{id => 1, connectorId => 1}},
+                                    variable => #{name => <<"Power">>}}]},
+          ocpp_message:id(GetVariablesRequest)),
+    ocpp_station:rpcreply(StationId, GetVariablesResponse),
+    {ok, 120} = ocpp_station:lookup_variable(StationId, "OCPPCommCtrlr", "WebSocketPingInterval", [], 'Actual'),
+    {error, undefined} = ocpp_station:lookup_variable(StationId, "Connector", "AvailabilityState", [{evse, 1}, {connector, 2}], 'Actual'),
+    {ok, undefined} = ocpp_station:lookup_variable(StationId, "EVSE", "Power", [{evse, 1}, {connector, 1}], 'Target').
+
 
 %%% Helper functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
