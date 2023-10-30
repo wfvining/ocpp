@@ -363,30 +363,40 @@ handle_event({call, From},
     {keep_state_and_data, [{reply, From, Reply}]};
 handle_event(cast, {rpcreply, 'SetVariables', MessageId, Message},
              #data{pending_set_variables = {MessageId, PendingSetVariables},
-                   device_model = DeviceModel}) ->
-    lists:foreach(
-      fun(SetVariableResult) ->
-              Status = ocpp_message:get(<<"attributeStatus">>, SetVariableResult),
-              if Status =:= <<"Accepted">> ->
-                      VarId = variable_identifiers(SetVariableResult),
-                      VarKey = maps:from_list(VarId),
-                      VariableIdentifiers = maps:with([variable_instance, component_instance, evse, connector],
-                                                      VarKey),
-                      io:format("Pending = ~p~nVarKey = ~p~n", [PendingSetVariables, VarKey]),
-                      ocpp_device_model:update_attribute(
-                        DeviceModel,
-                        maps:get(component, VarKey),
-                        maps:get(variable, VarKey),
-                        maps:to_list(VariableIdentifiers),
-                        binary_to_atom(maps:get(attribute_type, VarKey)),
-                        %% XXX This is not finding the key succesfully because
-                        %%     of differences in the capitalization of the strings
-                        element(2, lists:keyfind(capitalize(VarKey), 1, PendingSetVariables)));
-                 true ->
-                      ok %% not accepted, don't update the device model
-              end
-      end,
-      ocpp_message:get(<<"setVariableResult">>, Message)),
+                   device_model = DeviceModel} = Data) ->
+    Results =
+        lists:map(
+          fun(SetVariableResult) ->
+                  Status = ocpp_message:get(<<"attributeStatus">>, SetVariableResult),
+                  if Status =:= <<"Accepted">> ->
+                          VarId = variable_identifiers(SetVariableResult),
+                          VarKey = maps:from_list(VarId),
+                          VariableIdentifiers = maps:with([variable_instance, component_instance, evse, connector],
+                                                          VarKey),
+                          io:format("Pending = ~p~nVarKey = ~p~n", [PendingSetVariables, VarKey]),
+                          ocpp_device_model:update_attribute(
+                            DeviceModel,
+                            maps:get(component, VarKey),
+                            maps:get(variable, VarKey),
+                            maps:to_list(VariableIdentifiers),
+                            binary_to_atom(maps:get(attribute_type, VarKey)),
+                            element(2, lists:keyfind(capitalize(VarKey), 1, PendingSetVariables))),
+                            accepted;
+                     Status =:= <<"RebootRequired">> ->
+                          reboot_required;
+                     true ->
+                          rejected
+                  end
+          end,
+          ocpp_message:get(<<"setVariableResult">>, Message)),
+    case lists:member(reboot_required, Results) of
+        true ->
+            %% TODO May want to store a flag in the state machine data
+            %%      so the CSMS can querey if a reboot is required.
+            ocpp_handler:reboot_required(Data#data.stationid);
+        false ->
+            ok %% nothing to do
+    end,
     keep_state_and_data;
 handle_event(cast, {rpcreply, 'SetVariables', MessageId, _Message}, _Data) ->
     logger:notice("Dropping unexpected SetVariables reply with MessageId = ~p.", [MessageId]),

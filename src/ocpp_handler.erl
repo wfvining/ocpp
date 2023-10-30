@@ -25,7 +25,7 @@
          station_disconnected/1,
          station_ready/1]).
 %% OCPP events
--export([rpc_request/2, rpc_reply/2, report_rejected/3, report_received/2]).
+-export([rpc_request/2, rpc_reply/2, report_rejected/3, report_received/2, reboot_required/1]).
 %% gen_event callbacks
 -export([init/1, handle_event/2, handle_call/2]).
 
@@ -95,6 +95,12 @@ add_handler(StationId, CallbackModule, InitArg, Reason) ->
     gen_event:add_sup_handler(
       ?registry(StationId), ?MODULE,
       {recover, Reason, {StationId, CallbackModule, InitArg}}).
+
+%% @doc Notify the event manager that the station has indicated it
+%% needs to be rebooted.
+-spec reboot_required(StationId :: binary()) -> ok.
+reboot_required(StationId) ->
+    gen_event:notify(?registry(StationId), reboot_required).
 
 %% @doc Notify the event manager that the station has rejected a
 %% requested report.
