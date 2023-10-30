@@ -48,6 +48,7 @@
          pending = undefined :: undefined | ocpp_message:messageid(),
          pending_call = undefined :: undefined | {timer:tref(), ocpp_message:messageid()},
          pending_report = undefined :: undefined | {ocpp_message:messageid(), integer()},
+         pending_set_variables = undefined :: undefined | ocpp_message:message(),
          expecting_report = [] :: [integer()],
          device_model = ocpp_device_model:new() :: ocpp_device_model:device_model()}).
 
@@ -360,6 +361,36 @@ handle_event({call, From},
                 {error, undefined}
         end,
     {keep_state_and_data, [{reply, From, Reply}]};
+handle_event(cast, {rpcreply, 'SetVariables', MessageId, Message},
+             #data{pending_set_variables = {MessageId, PendingSetVariables},
+                   device_model = DeviceModel}) ->
+    lists:foreach(
+      fun(SetVariableResult) ->
+              Status = ocpp_message:get(<<"attributeStatus">>, SetVariableResult),
+              if Status =:= <<"Accepted">> ->
+                      VarId = variable_identifiers(SetVariableResult),
+                      VarKey = maps:from_list(VarId),
+                      VariableIdentifiers = maps:with([variable_instance, component_instance, evse, connector],
+                                                      VarKey),
+                      io:format("Pending = ~p~nVarKey = ~p~n", [PendingSetVariables, VarKey]),
+                      ocpp_device_model:update_attribute(
+                        DeviceModel,
+                        maps:get(component, VarKey),
+                        maps:get(variable, VarKey),
+                        maps:to_list(VariableIdentifiers),
+                        binary_to_atom(maps:get(attribute_type, VarKey)),
+                        %% XXX This is not finding the key succesfully because
+                        %%     of differences in the capitalization of the strings
+                        element(2, lists:keyfind(capitalize(VarKey), 1, PendingSetVariables)));
+                 true ->
+                      ok %% not accepted, don't update the device model
+              end
+      end,
+      ocpp_message:get(<<"setVariableResult">>, Message)),
+    keep_state_and_data;
+handle_event(cast, {rpcreply, 'SetVariables', MessageId, _Message}, _Data) ->
+    logger:notice("Dropping unexpected SetVariables reply with MessageId = ~p.", [MessageId]),
+    keep_state_and_data;
 handle_event(cast, {rpcreply, 'GetVariables', _MessageId, Message}, Data) ->
     lists:foreach(
       fun (GetVariableResult) -> process_get_variable(GetVariableResult, Data) end,
@@ -441,11 +472,19 @@ call_station(Message, #data{pending_call = undefined} = Data, Timeout) ->
                MessageType =:= 'GetReport' ->
             {ok, NewData#data{pending_report = {MessageId,
                                                 ocpp_message:get(<<"requestId">>, Message)}}};
+        MessageType
+          when MessageType =:= 'SetVariables' ->
+            {ok, NewData#data{pending_set_variables = {MessageId, extract_variables_request(Message)}}};
         _ ->
             {ok, NewData}
     end;
 call_station(_Message, Data, _) ->
     {{error, busy}, Data}.
+
+capitalize(Map) ->
+    maps:map(fun(_Key, Value) when is_binary(Value) -> string:uppercase(Value);
+                (_, Value) -> Value
+             end, Map).
 
 cleanup_connection(#data{connection = {_, Ref}} = Data) ->
     ocpp_handler:station_disconnected(Data#data.stationid),
@@ -487,25 +526,30 @@ handle_rpccall(Message, Data) ->
 init_evse(EVSE) ->
     maps:from_list(lists:zip(lists:seq(1, length(EVSE)), EVSE)).
 
+extract_variables_request(Message) ->
+    [extract_variable_request(M) || M <- ocpp_message:get(<<"setVariableData">>, Message)].
+
+extract_variable_request(Message) ->
+    AttributeValue = ocpp_message:get(<<"attributeValue">>, Message),
+    {capitalize(maps:from_list(variable_identifiers(Message))), AttributeValue}.
+
 process_get_variable(GetVariableResult, Data) ->
     case ocpp_message:get(<<"attributeStatus">>, GetVariableResult) of
         <<"Accepted">> ->
             ComponentName = ocpp_message:get(<<"component/name">>, GetVariableResult),
             ComponentOptions = component_options(ocpp_message:get(<<"component">>, GetVariableResult)),
             VariableName = ocpp_message:get(<<"variable/name">>, GetVariableResult),
-            AttributeType = ocpp_message:get(<<"attributeType">>, GetVariableResult),
+            AttributeType = ocpp_message:get(<<"attributeType">>, GetVariableResult, <<"Actual">>),
             AttributeValue = ocpp_message:get(<<"attributeValue">>, GetVariableResult),
             VariableOptions = get_optional(<<"variable/instance">>, variable_instance, GetVariableResult),
             Options = ComponentOptions ++ VariableOptions,
-            ocpp_device_model:add_attribute(
+            ocpp_device_model:update_attribute(
               Data#data.device_model,
               binary_to_list(ComponentName),
               binary_to_list(VariableName),
               Options,
               binary_to_atom(AttributeType),
-              AttributeValue,
-              [read, write], %% TODO
-              false); %% TODO
+              AttributeValue);
         _ -> ok
     end.
 
@@ -602,8 +646,8 @@ report_attributes(Attrs) ->
     [load_attribute(Attr) || Attr <- Attrs].
 
 report_variable_properties(ReportData) ->
-    %% TODO construct a proplist with the optional properties
-    %% contained in `ReportData'
+    %% construct a proplist with the optional properties contained in
+    %% `ReportData'
     ComponentInstance = ocpp_message:get(<<"component/instance">>, ReportData, nil),
     EVSE = ocpp_message:get(<<"component/evse">>, ReportData, nil),
     {EVSEId, ConnectorId} =
@@ -644,3 +688,11 @@ report_variable_properties(ReportData) ->
                            {valuelist, ValuesList},
                            {supports_monitoring, SuppportsMonitoring}],
           Val =/= nil].
+
+variable_identifiers(Message) ->
+    ComponentName = ocpp_message:get(<<"component/name">>, Message),
+    VariableName = ocpp_message:get(<<"variable/name">>, Message),
+    AttributeType = ocpp_message:get(<<"attributeType">>, Message, <<"Actual">>),
+    [{component, ComponentName}, {variable, VariableName}, {attribute_type, AttributeType}]
+        ++ get_optional(<<"variable/instance">>, variable_instance, Message)
+        ++ component_options(ocpp_message:get(<<"component">>, Message)).

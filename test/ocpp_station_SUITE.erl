@@ -119,7 +119,8 @@ init_per_testcase(report_idle, Config) ->
     provision_idle(StationId),
     Config1;
 init_per_testcase(Case, Config)
-  when Case =:= get_variables ->
+  when Case =:= get_variables;
+       Case =:= set_variables ->
     StationId = ?stationid(Case),
     Config1 = start_station(StationId, Config),
     ok = ocpp_station:connect(StationId),
@@ -186,7 +187,8 @@ groups() ->
        report_idle,
        multiple_reports,
        report_rejected,
-       get_variables]}].
+       get_variables,
+       set_variables]}].
 
 %%--------------------------------------------------------------------
 %% @spec all() -> GroupsAndTestCases | {skip,Reason}
@@ -514,6 +516,38 @@ get_variables(Config) ->
     {error, undefined} = ocpp_station:lookup_variable(StationId, "Connector", "AvailabilityState", [{evse, 1}, {connector, 2}], 'Actual'),
     {ok, undefined} = ocpp_station:lookup_variable(StationId, "EVSE", "Power", [{evse, 1}, {connector, 1}], 'Target').
 
+set_variables() ->
+    [{doc, "When a set variable request is accepted the device model is updated. "
+           "When a ser variable request is rejected the device model is not updated."},
+     {timetrap, 5000}].
+set_variables(Config) ->
+    StationId = ?config(stationid, Config),
+    SetVariablesRequest =
+        ocpp_message:new_request('SetVariables',
+                                 #{setVariableData => [#{component => #{name => <<"OCPPCommCtrlr">>},
+                                                         variable => #{name => <<"WebsocketPingInterval">>},
+                                                         attributeValue => <<"2">>},
+                                                       #{component => #{name => <<"EVSE">>,
+                                                                        evse => #{id => 1, connectorId => 1}},
+                                                         variable => #{name => <<"Power">>},
+                                                         attributeValue => <<"100">>}]}),
+    ocpp_station:call(StationId, SetVariablesRequest),
+    receive_ocpp(ocpp_message:id(SetVariablesRequest), rpccall,
+                 fun(Msg) -> ocpp_message:request_type(Msg) =:= 'SetVariables' end),
+    SetVariablesResponse =
+        ocpp_message:new_response(
+          'SetVariables',
+          #{setVariableResult => [#{attributeStatus => <<"Accepted">>,
+                                    component => #{name => <<"OCPPCommCtrlr">>},
+                                    variable => #{name => <<"WebSocketPingInterval">>}},
+                                  #{attributeStatus => <<"Rejected">>,
+                                    component => #{name => <<"EVSE">>,
+                                                   evse => #{id => 1, connectorId => 1}},
+                                    variable => #{name => <<"Power">>}}]},
+          ocpp_message:id(SetVariablesRequest)),
+    ocpp_station:rpcreply(StationId, SetVariablesResponse),
+    {ok, 2} = ocpp_station:lookup_variable(StationId, "OCPPCommCtrlr", "WebSocketPingInterval", [], 'Actual'),
+    {error, undefined} = ocpp_station:lookup_variable(StationId, "EVSE", "Power", [{evse, 1}, {connector, 1}], 'Actual').
 
 %%% Helper functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 

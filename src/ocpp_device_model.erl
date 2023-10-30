@@ -6,7 +6,7 @@
 
 -feature(maybe_expr, enable).
 
--export([new/0, add_variable/5, add_attribute/8, get_value/5]).
+-export([new/0, add_variable/5, add_attribute/8, get_value/5, update_attribute/6]).
 
 -export_type([device_model/0, attribute/0, charactersitics/0,
               variable_identifiers/0, attribute_type/0]).
@@ -57,7 +57,9 @@ make_characteristics({Component, Variable, Characteristics}) ->
 uppercase(X) when is_atom(X) ->
     X;
 uppercase(X) when is_list(X) ->
-    string:uppercase(X).
+    string:uppercase(X);
+uppercase(X) when is_binary(X) ->
+    uppercase(binary_to_list(X)).
 
 prepare_component({Name, EVSE, Connector, Instance}) ->
     {uppercase(Name), EVSE, Connector, uppercase(Instance)};
@@ -152,6 +154,36 @@ add_variable(DeviceModel,
                                          {connector, pos_integer()} |
                                          {variable_instance, string()} |
                                          {component_instance, string()}.
+
+update_attribute(DeviceModel,
+                 ComponentName,
+                 VariableName,
+                 VariableIdentifiers,
+                 AttributeType,
+                 AttributeValue) ->
+    Type = get_type(DeviceModel, ComponentName, VariableName, VariableIdentifiers),
+    Value = parse_value(Type, AttributeValue),
+    Component = make_component_identifier(ComponentName, VariableIdentifiers),
+    Variable = make_variable_identifier(VariableName, VariableIdentifiers),
+    case ets:lookup(DeviceModel#device_model.attributes, {Component, Variable, AttributeType}) of
+        [] ->
+            add_attribute(DeviceModel, ComponentName, VariableName, VariableIdentifiers, AttributeType, AttributeValue);
+        [_] ->
+            ets:update_element(DeviceModel#device_model.attributes, {Component, Variable, AttributeType}, [{2, Value}])
+    end.
+
+%% Add an attribute with default mutability and persistence values
+add_attribute(DeviceModel, ComponentName, VariableName, VariableIdentifiers, AttributeType, AttributeValue) ->
+    add_attribute(
+      DeviceModel,
+      ComponentName,
+      VariableName,
+      VariableIdentifiers,
+      AttributeType,
+      AttributeValue,
+      [read, write],
+      false).
+
 add_attribute(DeviceModel,
               ComponentName,
               VariableName,

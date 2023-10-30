@@ -29,3 +29,26 @@
                            | {init, any()}.
 add_station(StationId, NumEVSE, Handler) ->
     ocpp_manager:add_station(StationId, NumEVSE, Handler).
+
+set_variables(StationId, Variables) ->
+    case ocpp_station:items_per_message(StationId, 'SetVariables') of
+        {ok, MaxItems} ->
+            do_set_variables(StationId, Variables, MaxItems);
+        {error, Reason} when Reason =/= disconnected ->
+            %% Fall back on a safe number
+            do_set_variables(StationId, Variables, 1);
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+do_set_variables(StationId, Variables, MaxItems) when length(Variables) =< MaxItems ->
+    Msg = ocpp_message:new_request('SetVariables', #{<<"setVariableData">> => Variables}) ,
+    ocpp_station:call(StationId, Msg);
+do_set_variables(StationId, Variables, MaxItems) ->
+    {Vars, Rest} = lists:split(MaxItems, Variables),
+    case do_set_variables(StationId, Vars, MaxItems) of
+        {error, Reason} ->
+            {error, Reason};
+        {ok, Results} ->
+            {ok, Results ++ do_set_variables(StationId, Rest, MaxItems)}
+    end.
