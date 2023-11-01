@@ -112,8 +112,10 @@ init_per_testcase(boot_accepted, Config) ->
     ok = ocpp_station:connect(StationId),
     boot_station(StationId, <<"Accepted">>),
     Config1;
-init_per_testcase(report_idle, Config) ->
-    StationId = ?stationid(report_idle),
+init_per_testcase(Case, Config)
+  when Case =:= report_idle;
+       Case =:= sync_call ->
+    StationId = ?stationid(Case),
     Config1 = start_station(StationId, Config),
     ok = ocpp_station:connect(StationId),
     provision_idle(StationId),
@@ -152,7 +154,10 @@ end_per_testcase(TestCase, Config)
        TestCase =:= report_pending;
        TestCase =:= report_idle;
        TestCase =:= report_rejected;
-       TestCase =:= multiple_reports ->
+       TestCase =:= multiple_reports;
+       TestCase =:= get_variables;
+       TestCase =:= set_variables;
+       TestCase =:= sync_call ->
     Sup = ?config(stationsup, Config),
     unlink(Sup),
     ocpp_station_sup:stop(Sup),
@@ -199,7 +204,7 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() ->
-    [{group, provisioning}].
+    [{group, provisioning}, sync_call].
 
 boot() ->
     [{timetrap, 5000}].
@@ -548,6 +553,35 @@ set_variables(Config) ->
     ocpp_station:rpcreply(StationId, SetVariablesResponse),
     {ok, 2} = ocpp_station:lookup_variable(StationId, "OCPPCommCtrlr", "WebSocketPingInterval", [], 'Actual'),
     {error, undefined} = ocpp_station:lookup_variable(StationId, "EVSE", "Power", [{evse, 1}, {connector, 1}], 'Actual').
+
+sync_call() ->
+    [{doc, "A synchronous call times out when no response is received from the station"},
+     {timetrap, 5000}].
+sync_call(Config) ->
+    StationId = ?config(stationid, Config),
+    SetVariablesRequest =
+        ocpp_message:new_request('SetVariables',
+                                 #{setVariableData => [#{component => #{name => <<"OCPPCommCtrlr">>},
+                                                         variable => #{name => <<"WebsocketPingInterval">>},
+                                                         attributeValue => <<"2">>},
+                                                       #{component => #{name => <<"EVSE">>,
+                                                                        evse => #{id => 1, connectorId => 1}},
+                                                         variable => #{name => <<"Power">>},
+                                                         attributeValue => <<"100">>}]}),
+    ?assertExit({timeout, _}, ocpp_station:call_sync(StationId, SetVariablesRequest, 50)),
+    SetVariablesResponse =
+        ocpp_message:new_response(
+          'SetVariables',
+          #{setVariableResult => [#{attributeStatus => <<"Accepted">>,
+                                    component => #{name => <<"OCPPCommCtrlr">>},
+                                    variable => #{name => <<"WebSocketPingInterval">>}},
+                                  #{attributeStatus => <<"Rejected">>,
+                                    component => #{name => <<"EVSE">>,
+                                                   evse => #{id => 1, connectorId => 1}},
+                                    variable => #{name => <<"Power">>}}]},
+          ocpp_message:id(SetVariablesRequest)),
+    timer:apply_after(50, ocpp_station, rpcreply, [StationId, SetVariablesResponse]),
+    ok = ocpp_station:call_sync(StationId, SetVariablesRequest, 200).
 
 %%% Helper functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
