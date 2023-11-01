@@ -7,7 +7,7 @@
 -type message_body() :: #{binary() | string() => jerk:primterm() | message_body()}
                       | [{binary() | string(), jerk:primterm() | message_body()}].
 
--export_type([message/0, messageid/0]).
+-export_type([message/0, messageid/0, messagetype/0]).
 
 -type messagetype() :: 'Authorize'
                      | 'BootNotification'

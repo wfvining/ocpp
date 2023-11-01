@@ -50,6 +50,7 @@
          pending_report = undefined :: undefined | {ocpp_message:messageid(), integer()},
          pending_set_variables = undefined :: undefined | ocpp_message:message(),
          expecting_report = [] :: [integer()],
+         expecting_message :: ocpp_message:messagetype(),
          device_model = ocpp_device_model:new() :: ocpp_device_model:device_model(),
          sync_call :: undefined | ocpp_message:messageid()}).
 
@@ -212,15 +213,15 @@ boot_pending({call, From}, {send_request, Message, Timeout, Options}, Data) ->
           when MessageType =:= 'SetVariables';
                MessageType =:= 'GetVariables';
                MessageType =:= 'GetBaseReport';
-               MessageType =:= 'GetReport';
-               MessageType =:= 'TriggerMessage' ->
+               MessageType =:= 'GetReport' ->
             {Reply, NewData} = call_station(Message, Data, Timeout),
-            case proplists:get_bool(sync, Options) of
-                true ->
-                    {keep_state, NewData#data{sync_call = {From, ocpp_message:id(Message)}}};
-                false ->
-                    {keep_state, NewData, [{reply, From, Reply}]}
-            end;
+            {keep_state, sync_async_reply(From, Reply, Message, Options, NewData)};
+        MessageType
+          when MessageType =:= 'TriggerMessage' ->
+            Expected = binary_to_atom(ocpp_message:get(<<"requestedMessage">>, Message)),
+            {Reply, NewData} = call_station(Message, Data, Timeout),
+            {keep_state, sync_async_reply(
+                           From, Reply, Message, Options, NewData#data{expecting_message = Expected})};
         _ ->
             {keep_state_and_data, [{reply, From, {error, illegal_request}}]}
     end;
@@ -241,6 +242,28 @@ boot_pending(cast, {rpccall, 'NotifyReport', MessageId, Message},
             ok = send_error(Error, Data),
             keep_state_and_data
     end;
+boot_pending(cast, {rpccall, MessageType, _MessageId, _Message},
+             #data{expecting_message = MessageType} = Data)
+  when MessageType =:= 'LogStatusNotification';
+       MessageType =:= 'FirmwareStatusNotification';
+       MessageType =:= 'MeterValues';
+       MessageType =:= 'SignCertificate';
+       MessageType =:= 'StatusNotification';
+       MessageType =:= 'TransactionEvent';
+       MessageType =:= 'PublishFirmwareStatusNotification' ->
+    %% TODO These are the messages that can be triggered via a
+    %%      TriggerMessage request. each of them will probably need to
+    %%      be handled separately (like 'Heartbeat' below) once I know
+    %%      what to do with them.
+    %%
+    %% Since we don't know what to do just let the station time out
+    %% for now.
+    {keep_state, Data#data{expecting_message = undefined}};
+boot_pending(cast, {rpccall, MessageType, MessageId, _Message},
+             #data{expecting_message = MessageType} = Data)
+  when MessageType =:= 'Heartbeat' ->
+    send_response(heartbeat_response(MessageId), Data),
+    {keep_state, Data#data{expecting_message = undefined}};
 boot_pending(cast, {rpccall, _, _, Message}, Data) ->
     Error =
         ocpp_error:new(
@@ -281,12 +304,7 @@ provisioning(EventType, Event, Data) ->
 
 idle({call, From}, {send_request, Message, Timeout, Options}, Data) ->
     {Reply, NewData} = call_station(Message, Data, Timeout),
-    case proplists:get_bool(sync, Options) of
-        true ->
-            {keep_state, NewData#data{sync_call = {From, ocpp_message:id(Message)}}};
-        false ->
-            {keep_state, NewData, [{reply, From, Reply}]}
-    end;
+    {keep_state, sync_async_reply(From, Reply, Message, Options, NewData)};
 idle(cast, {rpccall, 'NotifyReport', MessageId, Message},
      #data{expecting_report = ExpectedReports} = Data) ->
     RequestId = ocpp_message:get(<<"requestId">>, Message),
@@ -719,6 +737,18 @@ report_variable_properties(ReportData) ->
                            {valuelist, ValuesList},
                            {supports_monitoring, SuppportsMonitoring}],
           Val =/= nil].
+
+sync_async_reply(From, ok, Message, Options, Data) ->
+    case proplists:get_bool(sync, Options) of
+        true ->
+            Data#data{sync_call = {From, ocpp_message:id(Message)}};
+        false ->
+            gen_statem:reply(From, ok),
+            Data
+    end;
+sync_async_reply(From, Reply, _Message, _Options, Data) ->
+    gen_statem:reply(From, Reply),
+    Data.
 
 variable_identifiers(Message) ->
     ComponentName = ocpp_message:get(<<"component/name">>, Message),
