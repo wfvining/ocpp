@@ -50,7 +50,8 @@
          pending_report = undefined :: undefined | {ocpp_message:messageid(), integer()},
          pending_set_variables = undefined :: undefined | ocpp_message:message(),
          expecting_report = [] :: [integer()],
-         device_model = ocpp_device_model:new() :: ocpp_device_model:device_model()}).
+         device_model = ocpp_device_model:new() :: ocpp_device_model:device_model(),
+         sync_call :: undefined | ocpp_message:messageid()}).
 
 -spec start_link(StationId :: binary(),
                  EVSE :: [ocpp_evse:evse()]) -> gen_statem:start_ret().
@@ -80,7 +81,7 @@ rpccall(Station, Request) ->
 reply(StationId, Response) ->
     gen_statem:cast(?registry(StationId), {reply, Response}).
 
-%% @equiv call_async(Station, Request, 30000)
+%% @equiv call(Station, Request, 30000)
 -spec call(Station :: binary(), Request :: ocpp_message:message()) ->
           ok |
           {error, Reason :: busy | offline}.
@@ -102,7 +103,11 @@ call(Station, Request) ->
           ok |
           {error, Reason :: busy | offline}.
 call(Station, Request, Timeout) ->
-    gen_statem:call(?registry(Station), {send_request, Request, Timeout}).
+    gen_statem:call(?registry(Station), {send_request, Request, Timeout, []}).
+
+%% @doc Send an RPCCALL to the station and wait for an RPCREPLY.
+call_sync(Station, Request, Timeout) ->
+    gen_statem:call(?registry(Station), {send_request, Request, Timeout, [sync]}).
 
 %% @doc Notify the state machine that an RPCREPLY has arrived.
 -spec rpcreply(Station :: binary(), Reply :: ocpp_message:message()) ->
@@ -147,7 +152,7 @@ disconnected({call, From}, {connect, ConnectionPid}, Data) ->
     {next_state, connected,
      setup_connection(Data, ConnectionPid),
      [{reply, From, ok}]};
-disconnected({call, From}, {send_request, _, _}, _Data) ->
+disconnected({call, From}, {send_request, _, _, _}, _Data) ->
     {keep_state_and_data, [{reply, From, {error, not_connected}}]}.
 
 connected({call, From}, {connect, _}, _Data) ->
@@ -161,7 +166,7 @@ connected(cast, {rpccall, _, MessageId, _}, Data) ->
     Error = ocpp_error:new('SecurityError', MessageId),
     ok = send_error(Error, Data),
     keep_state_and_data;
-connected({call, From}, {send_request, _, _}, _Data) ->
+connected({call, From}, {send_request, _, _, _}, _Data) ->
     {keep_state_and_data, [{reply, From, {error, not_accepted}}]};
 connected(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
@@ -201,7 +206,7 @@ booting(cast, {error, Error}, #data{pending = MessageId} = Data) ->
 booting(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
-boot_pending({call, From}, {send_request, Message, Timeout}, Data) ->
+boot_pending({call, From}, {send_request, Message, Timeout, Options}, Data) ->
     case ocpp_message:request_type(Message) of
         MessageType
           when MessageType =:= 'SetVariables';
@@ -210,7 +215,13 @@ boot_pending({call, From}, {send_request, Message, Timeout}, Data) ->
                MessageType =:= 'GetReport';
                MessageType =:= 'TriggerMessage' ->
             {Reply, NewData} = call_station(Message, Data, Timeout),
-            {keep_state, NewData, [{reply, From, Reply}]};
+            %% TODO handle sync request
+            case proplists:get_bool(sync, Options) of
+                true ->
+                    {keep_state, NewData#data{sync_call = {From, ocpp_message:id(Message)}}};
+                false ->
+                    {keep_state, NewData, [{reply, From, Reply}]}
+            end;
         _ ->
             {keep_state_and_data, [{reply, From, {error, illegal_request}}]}
     end;
@@ -269,9 +280,15 @@ provisioning(cast, disconnect, Data) ->
 provisioning(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
-idle({call, From}, {send_request, Message, Timeout}, Data) ->
+idle({call, From}, {send_request, Message, Timeout, Options}, Data) ->
+    %% TODO handle sync request
     {Reply, NewData} = call_station(Message, Data, Timeout),
-    {keep_state, NewData, [{reply, From, Reply}]};
+    case proplists:get_bool(sync, Options) of
+        true ->
+            {keep_state, NewData#data{sync_call = {From, ocpp_message:id(Message)}}};
+        false ->
+            {keep_state, NewData, [{reply, From, Reply}]}
+    end;
 idle(cast, {rpccall, 'NotifyReport', MessageId, Message},
      #data{expecting_report = ExpectedReports} = Data) ->
     RequestId = ocpp_message:get(<<"requestId">>, Message),
@@ -311,7 +328,7 @@ idle(EventType, Event, Data) ->
 offline({call, From}, {connect, Pid}, Data) ->
     {next_state, reconnecting, setup_connection(Data, Pid),
      [{reply, From, ok}]};
-offline({call, From}, {send_request, _, _}, _Data) ->
+offline({call, From}, {send_request, _, _, _}, _Data) ->
     {keep_state_and_data, [{reply, From, {error, offline}}]}.
 
 reconnecting(cast, {rpccall, MessageType, _, _}, Data)
@@ -321,7 +338,7 @@ reconnecting(cast, {rpccall, MessageType, _, _}, Data)
 reconnecting(cast, {rpccall, MessageType, _, _}, Data)
   when MessageType =:= 'BootNotification' ->
     {next_state, connected, Data, [postpone]};
-reconnecting({call, From}, {send_request, _, _}, _Data) ->
+reconnecting({call, From}, {send_request, _, _, _}, _Data) ->
     {keep_state_and_data, [{reply, From, {error, offline}}]};
 reconnecting(cast, disconnect, Data) ->
     {next_state, offline, cleanup_connection(Data)};
@@ -397,7 +414,7 @@ handle_event(cast, {rpcreply, 'SetVariables', MessageId, Message},
         false ->
             ok %% nothing to do
     end,
-    keep_state_and_data;
+    {keep_state, clear_sync_call(Data)};
 handle_event(cast, {rpcreply, 'SetVariables', MessageId, _Message}, _Data) ->
     logger:notice("Dropping unexpected SetVariables reply with MessageId = ~p.", [MessageId]),
     keep_state_and_data;
@@ -405,7 +422,7 @@ handle_event(cast, {rpcreply, 'GetVariables', _MessageId, Message}, Data) ->
     lists:foreach(
       fun (GetVariableResult) -> process_get_variable(GetVariableResult, Data) end,
       ocpp_message:get(<<"getVariableResult">>, Message)),
-    keep_state_and_data;
+    {keep_state, clear_sync_call(Data)};
 handle_event(cast, {rpcreply, MsgType, MessageId, Message},
              #data{pending_report = {MessageId, RequestId},
                    pending_call = {TRef, MessageId}} = Data)
@@ -423,13 +440,13 @@ handle_event(cast, {rpcreply, MsgType, MessageId, Message},
                 Data#data{pending_report = undefined,
                           pending_call = undefined}
         end,
-    {keep_state, NewData};
+    {keep_state, clear_sync_call(NewData)};
 handle_event(cast, {rpcreply, _MsgType, MessageId, Message},
              #data{pending_call = {TRef, MessageId}} = Data) ->
     ocpp_handler:rpc_reply(Data#data.stationid, Message),
     timer:cancel(TRef),
-    {keep_state, Data#data{pending_call = undefined,
-                           pending_report = undefined}};
+    NewData = Data#data{pending_call = undefined, pending_report = undefined},
+    {keep_state, clear_sync_call(NewData)};
 handle_event(cast, {rpcreply, _, _, _}, _) ->
     keep_state_and_data;
 handle_event(info, {call_timeout, MessageId},
@@ -503,6 +520,12 @@ cleanup_connection(#data{connection = {_, Ref}} = Data) ->
 
 clear_pending_request(Data) ->
     Data#data{pending = undefined}.
+
+clear_sync_call(#data{sync_call = {From, _MessageId}} = Data) ->
+    gen_statem:reply(From, ok),
+    Data#data{sync_call = undefined};
+clear_sync_call(Data) ->
+    Data.
 
 component_options(Component) ->
     lists:flatten([get_optional(<<"instance">>, component_instance, Component),
