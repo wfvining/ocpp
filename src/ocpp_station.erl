@@ -221,7 +221,7 @@ boot_pending({call, From}, {send_request, Message, Timeout, Options}, Data) ->
             Expected = binary_to_atom(ocpp_message:get(<<"requestedMessage">>, Message)),
             {Reply, NewData} = call_station(Message, Data, Timeout),
             {keep_state, sync_async_reply(
-                           From, Reply, Message, Options, NewData#data{expecting_message = Expected})};
+                           From, Reply, Message, Options, NewData#data{expecting_message = {pending, Expected}})};
         _ ->
             {keep_state_and_data, [{reply, From, {error, illegal_request}}]}
     end;
@@ -457,6 +457,19 @@ handle_event(cast, {rpcreply, MsgType, MessageId, Message},
                           pending_call = undefined}
         end,
     {keep_state, clear_sync_call(MessageId, NewData)};
+handle_event(cast, {rpcreply, 'TriggerMessage', MessageId, Message},
+             #data{expecting_message = {pending, Expected},
+                   pending_call = {TRef, MessageId}} = Data) ->
+    timer:cancel(TRef),
+    ExpectingMessage =
+        case ocpp_message:get(<<"status">>, Message) of
+            <<"Accepted">> ->
+                Expected;
+            <<"Rejected">> ->
+                undefined
+        end,
+    NewData = Data#data{pending_call = undefined, expecting_message = ExpectingMessage},
+    {keep_state, NewData};
 handle_event(cast, {rpcreply, _MsgType, MessageId, Message},
              #data{pending_call = {TRef, MessageId}} = Data) ->
     ocpp_handler:rpc_reply(Data#data.stationid, Message),

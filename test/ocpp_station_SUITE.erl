@@ -100,7 +100,8 @@ init_per_testcase(Case, Config)
  when Case =:= boot_pending;
       Case =:= report_pending;
       Case =:= multiple_reports;
-      Case =:= report_rejected ->
+      Case =:= report_rejected;
+      Case =:= pending_trigger_message ->
     StationId = ?stationid(Case),
     Config1 = start_station(StationId, Config),
     ok = ocpp_station:connect(StationId),
@@ -157,7 +158,8 @@ end_per_testcase(TestCase, Config)
        TestCase =:= multiple_reports;
        TestCase =:= get_variables;
        TestCase =:= set_variables;
-       TestCase =:= sync_call ->
+       TestCase =:= sync_call;
+       TestCase =:= pending_trigger_message ->
     Sup = ?config(stationsup, Config),
     unlink(Sup),
     ocpp_station_sup:stop(Sup),
@@ -184,6 +186,7 @@ groups() ->
        message_before_boot,
        boot_pending,
        boot_accepted,
+       pending_trigger_message,
        {group, offline},
        {group, configure}]},
      {offline, [parallel], [offline_reconnect, offline_reboot]},
@@ -582,6 +585,43 @@ sync_call(Config) ->
           ocpp_message:id(SetVariablesRequest)),
     timer:apply_after(50, ocpp_station, rpcreply, [StationId, SetVariablesResponse]),
     ok = ocpp_station:call_sync(StationId, SetVariablesRequest, 200).
+
+pending_trigger_message() ->
+    [{doc, "Certain messages can be triggered by the CSMS while the station is in the pending state"},
+     {timetrap, 5000}].
+pending_trigger_message(Config) ->
+    StationId = ?config(stationid, Config),
+    %% Without a trigger request the message results in a security error.
+    Heartbeat1 = ocpp_message:new_request('Heartbeat', #{}),
+    ok = ocpp_station:rpccall(StationId, Heartbeat1),
+    receive_ocpp(ocpp_message:id(Heartbeat1), rpcerror,
+                 fun(Msg) -> ocpp_error:code(Msg) =:= <<"SecurityError">> end),
+    ct:pal("first test passed"),
+
+    TriggerMessage1 = ocpp_message:new_request('TriggerMessage', #{requestedMessage => <<"Heartbeat">>}),
+    ocpp_station:call(StationId, TriggerMessage1),
+    receive_ocpp(ocpp_message:id(TriggerMessage1), rpccall),
+    ocpp_station:rpcreply(
+      StationId,
+      ocpp_message:new_response('TriggerMessage',
+                                #{status => <<"Rejected">>}, ocpp_message:id(TriggerMessage1))),
+    Heartbeat2 = ocpp_message:new_request('Heartbeat', #{}),
+    ok = ocpp_station:rpccall(StationId, Heartbeat2),
+    receive_ocpp(ocpp_message:id(Heartbeat2), rpcerror,
+                 fun(Msg) -> ocpp_error:code(Msg) =:= <<"SecurityError">> end),
+    ct:pal("second test passed"),
+
+    TriggerMessage2 = ocpp_message:new_request('TriggerMessage', #{requestedMessage => <<"Heartbeat">>}),
+    ocpp_station:call(StationId, TriggerMessage2),
+    receive_ocpp(ocpp_message:id(TriggerMessage2), rpccall),
+    ocpp_station:rpcreply(
+      StationId,
+      ocpp_message:new_response('TriggerMessage',
+                                #{status => <<"Accepted">>}, ocpp_message:id(TriggerMessage2))),
+    Heartbeat3 = ocpp_message:new_request('Heartbeat', #{}),
+    ok = ocpp_station:rpccall(StationId, Heartbeat3),
+    receive_ocpp(ocpp_message:id(Heartbeat3), rpcreply).
+
 
 %%% Helper functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
