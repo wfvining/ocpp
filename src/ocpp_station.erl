@@ -255,9 +255,8 @@ boot_pending(cast, {rpccall, MessageType, _MessageId, _Message},
     %%      TriggerMessage request. each of them will probably need to
     %%      be handled separately (like 'Heartbeat' below) once I know
     %%      what to do with them.
-    %%
-    %% Since we don't know what to do just let the station time out
-    %% for now.
+    Error = ocpp_error:new('NotSupported', []),
+    ok = send_error(Error, Data),
     {keep_state, Data#data{expecting_message = undefined}};
 boot_pending(cast, {rpccall, MessageType, MessageId, _Message},
              #data{expecting_message = MessageType} = Data)
