@@ -76,7 +76,7 @@
 
 %%% ========= OCPP Message-Related Types =========
 
--export_type([boot_request/0, set_variables_request/0]).
+-export_type([boot_request/0, set_variables_request/0, set_variable_data/0]).
 -export_type([boot_response/0, set_variables_response/0]).
 
 -export_type([boot_status/0, status_info/0, boot_reason/0,
@@ -137,7 +137,7 @@
 
 -type set_variables_request() ::
         #{'setVariableData' := [set_variable_data()],
-          'customData' => custom_data}.
+          'customData' => custom_data()}.
 
 -type set_variable_status() ::
         'Accepted' |
