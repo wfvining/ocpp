@@ -424,7 +424,7 @@ handle_event(cast, {rpcreply, 'SetVariables', MessageId, Message},
         false ->
             ok %% nothing to do
     end,
-    {keep_state, clear_sync_call(MessageId, Data)};
+    {keep_state, clear_sync_call(MessageId, Message, Data)};
 handle_event(cast, {rpcreply, 'SetVariables', MessageId, _Message}, _Data) ->
     logger:notice("Dropping unexpected SetVariables reply with MessageId = ~p.", [MessageId]),
     keep_state_and_data;
@@ -432,7 +432,7 @@ handle_event(cast, {rpcreply, 'GetVariables', MessageId, Message}, Data) ->
     lists:foreach(
       fun (GetVariableResult) -> process_get_variable(GetVariableResult, Data) end,
       ocpp_message:get(<<"getVariableResult">>, Message)),
-    {keep_state, clear_sync_call(MessageId, Data)};
+    {keep_state, clear_sync_call(MessageId, Message, Data)};
 handle_event(cast, {rpcreply, MsgType, MessageId, Message},
              #data{pending_report = {MessageId, RequestId},
                    pending_call = {TRef, MessageId}} = Data)
@@ -450,7 +450,7 @@ handle_event(cast, {rpcreply, MsgType, MessageId, Message},
                 Data#data{pending_report = undefined,
                           pending_call = undefined}
         end,
-    {keep_state, clear_sync_call(MessageId, NewData)};
+    {keep_state, clear_sync_call(MessageId, Message, NewData)};
 handle_event(cast, {rpcreply, 'TriggerMessage', MessageId, Message},
              #data{expecting_message = {pending, Expected},
                    pending_call = {TRef, MessageId}} = Data) ->
@@ -469,7 +469,7 @@ handle_event(cast, {rpcreply, _MsgType, MessageId, Message},
     ocpp_handler:rpc_reply(Data#data.stationid, Message),
     timer:cancel(TRef),
     NewData = Data#data{pending_call = undefined, pending_report = undefined},
-    {keep_state, clear_sync_call(MessageId, NewData)};
+    {keep_state, clear_sync_call(MessageId, Message, NewData)};
 handle_event(cast, {rpcreply, _, _, _}, _) ->
     keep_state_and_data;
 handle_event(info, {call_timeout, MessageId},
@@ -544,10 +544,10 @@ cleanup_connection(#data{connection = {_, Ref}} = Data) ->
 clear_pending_request(Data) ->
     Data#data{pending = undefined}.
 
-clear_sync_call(MesesageId, #data{sync_call = {From, MessageId}} = Data) ->
-    gen_statem:reply(From, ok),
+clear_sync_call(MesesageId, Message, #data{sync_call = {From, MessageId}} = Data) ->
+    gen_statem:reply(From, {ok, Message}),
     Data#data{sync_call = undefined};
-clear_sync_call(_, Data) ->
+clear_sync_call(_, _, Data) ->
     Data.
 
 component_options(Component) ->

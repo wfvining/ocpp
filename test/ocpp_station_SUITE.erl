@@ -584,7 +584,8 @@ sync_call(Config) ->
                                     variable => #{name => <<"Power">>}}]},
           ocpp_message:id(SetVariablesRequest)),
     timer:apply_after(50, ocpp_station, rpcreply, [StationId, SetVariablesResponse]),
-    ok = ocpp_station:call_sync(StationId, SetVariablesRequest, 200).
+    {ok, Response} = ocpp_station:call_sync(StationId, SetVariablesRequest, 200),
+    ?assertEqual(SetVariablesResponse, Response).
 
 pending_trigger_message() ->
     [{doc, "Certain messages can be triggered by the CSMS while the station is in the pending state"},
