@@ -242,7 +242,7 @@ boot_pending(cast, {rpccall, 'NotifyReport', MessageId, Message},
             ok = send_error(Error, Data),
             keep_state_and_data
     end;
-boot_pending(cast, {rpccall, MessageType, _MessageId, _Message},
+boot_pending(cast, {rpccall, MessageType, _MessageId, Message},
              #data{expecting_message = MessageType} = Data)
   when MessageType =:= 'LogStatusNotification';
        MessageType =:= 'FirmwareStatusNotification';
@@ -251,13 +251,8 @@ boot_pending(cast, {rpccall, MessageType, _MessageId, _Message},
        MessageType =:= 'StatusNotification';
        MessageType =:= 'TransactionEvent';
        MessageType =:= 'PublishFirmwareStatusNotification' ->
-    %% TODO These are the messages that can be triggered via a
-    %%      TriggerMessage request. each of them will probably need to
-    %%      be handled separately (like 'Heartbeat' below) once I know
-    %%      what to do with them.
-    Error = ocpp_error:new('NotSupported', []),
-    ok = send_error(Error, Data),
-    {keep_state, Data#data{expecting_message = undefined}};
+    NewData = handle_rpccall(Message, Data),
+    {keep_state, NewData#data{expecting_message = undefined}};
 boot_pending(cast, {rpccall, MessageType, MessageId, _Message},
              #data{expecting_message = MessageType} = Data)
   when MessageType =:= 'Heartbeat' ->
