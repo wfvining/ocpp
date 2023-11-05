@@ -9,7 +9,7 @@
 
 -export_type([evse/0, connector/0, status/0]).
 
--record(connector, {status = 'Unavailable' :: status()}).
+-record(connector, {status = 'Available' :: status()}).
 -record(evse, {connectors = [] :: [connector()]}).
 
 -opaque connector() :: #connector{}.
