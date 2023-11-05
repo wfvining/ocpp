@@ -2,11 +2,21 @@
 %%% of charging station management systems to connect their business
 %%% logic with OCPP.
 %%%
-%%% The only required callback is `init/1'. All others are
-%%% optional. If `handle_info/2' is not implemented, info messages are
-%%% dropped. Any OCPP message type for which the corresponding
-%%% callback is unimplemented will receive an error response with the
-%%% error code `"NotSupported"'.
+%%% The required callbacks are `init/1', and `handle_ocpp/3'. The
+%%% latter is called whenever an OCPP request that requires the CSMS
+%%% to reply is received from the station. Messages such as heartbeats
+%%% are handled automatically and don't require CSMS intervention,
+%%% therefor this callback is not invoked for such
+%%% messages. Similarly, messages that may arrive in several parts
+%%% such as Report Notifications will not trigger this
+%%% callback. Instead, once the full report is received a
+%%% `{report_received, RequestId}' event will be passed to the
+%%% `handle_info/2' callback.
+%%%
+%%% If your CSMS implementation uses asynchronous calls to the station
+%%% you should implement the `handle_async_reply/3' callback. This
+%%% callback is invoked whenever the response to an asychronous call
+%%% is received. If it is not implemented the response will be dropped.
 %%%
 %%% <b>Note:</b> All exported functions from this module are used
 %%% internally by the ocpp application and should not be called directly.
@@ -25,26 +35,14 @@
          station_disconnected/1,
          station_ready/1]).
 %% OCPP events
--export([rpc_request/2, rpc_reply/2, rpc_error/2, report_rejected/3, report_received/2, reboot_required/1]).
+-export([rpc_request/2, rpc_reply/2, rpc_error/2, report_received/2, reboot_required/1]).
 %% gen_event callbacks
 -export([init/1, handle_event/2, handle_call/2]).
-
--export_type([handler_error/0, handler_ret/1]).
 
 -record(state, {handler_state :: any(),
                 init_arg :: any(),
                 mod :: module(),
                 stationid :: binary()}).
-
--type handler_error() :: #{'ErrorCode' => binary(),
-                           'ErrorDescription' => binary(),
-                           'ErrorDetails' => #{binary() => any()}}.
-
--type handler_ret(ResponseType) :: {reply, ResponseType, any()}
-                                 | {error, handler_error(), any()}.
-
--type request() :: ocpp_message:message().
--type response() :: ocpp_message:message().
 
 %%% ========= Callback Definitions =========
 
@@ -52,19 +50,30 @@
 %% Initialize any internal state the handler will need when responding
 %% to requests.
 
--callback handle_call_response(Response :: response(),
-                               State :: any()) ->
-    {ok, NewState :: any()}.
-%% Handle a response to an RPCCALL made to the station.
+-callback handle_ocpp(MsgType :: ocpp_message:messagetype(),
+                      Message :: ocpp_message:message(),
+                      State :: any()) ->
+    {reply, Message :: ocpp_message:message(), NewState :: any()} |
+    {error, Reason :: ocpp_error:error(), NewState :: any()} |
+    {noreply, NewState :: any()}.
+%% Handle a message sent by the charging station to the CSMS.
 
--callback handle_info(any(), State :: any()) -> {ok, NewState :: any()}.
-%% Handle events that are not OCPP messages.
+-callback handle_info(Info, State :: any()) ->
+    {ok, NewState :: any()}
+        when Info :: reboot_required |
+                     {report_received, ReportId :: integer()} |
+                     station_connected |
+                     station_disconnected |
+                     station_ready.
+%% Handle an event other than receipt of an OCPP message.
 
--callback boot_notification(Req :: request(), State :: any()) ->
-    handler_ret(ocpp_message:boot_response()).
-%% Handle a BootNotificationRequest.
+-callback handle_async_reply(ReplyType, Message, State :: any()) ->
+    {ok, NewState :: any()}
+        when Message :: ocpp_message:message() | ocpp_error:error(),
+             ReplyType :: callresult | callerror.
+%% Called when the response to an asynchronous RPCCALL is received.
 
--optional_callbacks([boot_notification/2, handle_info/2]).
+-optional_callback([handle_async_reply/3]).
 
 -define(registry(Name), {via, gproc, ?name(Name)}).
 -define(name(Name), {n, l, {?MODULE, Name}}).
@@ -101,13 +110,6 @@ add_handler(StationId, CallbackModule, InitArg, Reason) ->
 -spec reboot_required(StationId :: binary()) -> ok.
 reboot_required(StationId) ->
     gen_event:notify(?registry(StationId), reboot_required).
-
-%% @doc Notify the event manager that the station has rejected a
-%% requested report.
--spec report_rejected(StationId :: binary(), RequestId :: integer(), Reason :: binary()) ->
-          ok.
-report_rejected(StationId, RequestId, Reason) ->
-    gen_event:notify(?registry(StationId), {report_rejected, RequestId, binary_to_atom(Reason)}).
 
 -spec report_received(StationId :: binary(), RequestId :: integer()) -> ok.
 report_received(StationId, RequestId) ->
@@ -159,13 +161,26 @@ init({StationId, CallbackModule, InitArg}) ->
             {error, {init, Reason}}
     end.
 
-handle_event({rpc_request, Message}, State) ->
-    RequestFun = request_fun(ocpp_message:type(Message)),
-    NewState = do_request(RequestFun, Message, State),
-    {ok, NewState};
+handle_event({rpc_request, Message}, #state{stationid = StationId, mod = Mod, handler_state = HState} = State) ->
+    case Mod:handle_ocpp(ocpp_message:request_type(Message), Message, HState) of
+        {reply, Response, NewHState} ->
+            ocpp_station:reply(StationId, Response),
+            {ok, State#state{handler_state = NewHState}};
+        {error, Error, NewHState} ->
+            ocpp_station:error(StationId, Error),
+            {ok, State#state{handler_state = NewHState}};
+        {noreply, NewHState} ->
+            {ok, State#state{handler_state = NewHState}};
+        Ret ->
+            error({bad_return, Ret})
+    end;
 handle_event({rpc_reply, Message}, #state{mod = Mod, handler_state = HState} = State) ->
-    {ok, NewHState} = Mod:handle_call_response(Message, HState),
-    {ok, State#state{handler_state = NewHState}};
+    try
+        {ok, NewHState} = Mod:handle_async_reply(ocpp_message:response_type(Message), Message, HState),
+        {ok, State#state{handler_state = NewHState}}
+    catch error:undef ->
+            {ok, State}
+    end;
 handle_event(Event, #state{mod = Mod, handler_state = HState} = State) ->
     try Mod:handle_info(Event, HState) of
         {ok, NewState} ->
@@ -175,62 +190,6 @@ handle_event(Event, #state{mod = Mod, handler_state = HState} = State) ->
             {ok, State}
     end.
 
-request_fun(<<"BootNotificationRequest">>) -> boot_notification;
-request_fun(<<"Get15118EVCertificateRequest">>) -> get_15118_ev_certificate.
-
-response_type(boot_notification) -> 'BootNotification';
-response_type(get_15118_ev_certificate) -> 'Get1511EVCertificate'.
-
 handle_call(Call, State) ->
     io:format("got call ~p while state is ~p~n", [Call, State]),
     {ok, error, State}.
-
-%%% ========= Internal Functions =========
-
-do_request(RequestFun, Message,
-           #state{handler_state = HState, mod = Mod, stationid = StationId} = State) ->
-    try Mod:RequestFun(Message, HState) of
-        {reply, Response, NewHState} ->
-            MessageId = ocpp_message:id(Message),
-            ResponseMsg = ocpp_message:new_response(
-                            response_type(RequestFun),
-                            keys_to_binary(Response),
-                            MessageId),
-            ocpp_station:reply(StationId, ResponseMsg),
-            State#state{ handler_state = NewHState};
-        {error, Reason, NewHState} ->
-            Error = ocpp_error:new(
-                      'InternalError',
-                      ocpp_message:id(Message),
-                      [{details, #{<<"reason">> => Reason}}]),
-            ocpp_station:error(StationId, Error),
-            State#state{handler_state = NewHState}
-    catch error:undef ->
-            ocpp_station:error(
-              StationId,
-              ocpp_error:new('NotSupported', ocpp_message:id(Message))),
-            State;
-          Exception:Reason:Trace when Exception =:= error;
-                                      Exception =:= exit ->
-            logger:error("ocpp_handler ~p crashed.~n"
-                         "StationId: ~p~n"
-                         "Reason: ~p~n"
-                         "Message: ~p~n"
-                         "Handler State: ~p~n"
-                         "Stack trace: ~p~n",
-                         [Mod, StationId, Reason, Message, HState, Trace]),
-            Error = ocpp_error:new('InternalError',
-                                   ocpp_message:id(Message),
-                                   [{details, #{<<"reason">> => Reason}}]),
-            error({ocpp_handler_error, Error})
-    end.
-
-keys_to_binary(Map) ->
-    maps:fold(
-      fun (Key, Value, Acc) ->
-              Val = if
-                        is_map(Value) -> keys_to_binary(Value);
-                        true -> Value
-                    end,
-              Acc#{atom_to_binary(Key) => Val}
-      end, #{}, Map).
