@@ -17,9 +17,11 @@
 -behaviour(gen_statem).
 
 -export([start_link/2, stop/1,
-         call/2, call/3, call_sync/3, rpccall/2,
+         call/2, call/3,
+         call_async/2, call_async/3,
+         rpccall/2,
          reply/2, rpcreply/2,
-         error/2, %rpcerror/2,
+         error/2, rpcerror/2,
          lookup_variable/5,
          connect/1]).
 
@@ -82,12 +84,12 @@ rpccall(Station, Request) ->
 reply(StationId, Response) ->
     gen_statem:cast(?registry(StationId), {reply, Response}).
 
-%% @equiv call(Station, Request, 30000)
--spec call(Station :: binary(), Request :: ocpp_message:message()) ->
+%% @equiv call_async(Station, Request, 30000)
+-spec call_async(Station :: binary(), Request :: ocpp_message:message()) ->
           ok |
           {error, Reason :: busy | offline}.
-call(Station, Request) ->
-    call(Station, Request, 30000).
+call_async(Station, Request) ->
+    call_async(Station, Request, 30000).
 
 %% @doc Send an RPCCALL message to the station. If there is an
 %% outstanding request that has already been sent to the station this
@@ -103,11 +105,15 @@ call(Station, Request) ->
            Timeout :: pos_integer()) ->
           ok |
           {error, Reason :: busy | offline}.
-call(Station, Request, Timeout) ->
+call_async(Station, Request, Timeout) ->
     gen_statem:call(?registry(Station), {send_request, Request, Timeout, []}).
 
+%% equiv call(Station, Request, 30000)
+call(Station, Request) ->
+    call(Station, Request, 30000).
+
 %% @doc Send an RPCCALL to the station and wait for an RPCREPLY.
-call_sync(Station, Request, Timeout) ->
+call(Station, Request, Timeout) ->
     gen_statem:call(?registry(Station), {send_request, Request, Timeout, [sync]}, Timeout).
 
 %% @doc Notify the state machine that an RPCREPLY has arrived.
@@ -122,6 +128,11 @@ rpcreply(Station, Response) ->
 -spec error(StationId :: binary(), Error :: ocpp_error:error()) -> ok.
 error(StationId, Error) ->
     gen_statem:cast(?registry(StationId), {error, Error}).
+
+%% @doc Notify the state machine that an RPCERROR has arrived.
+-spec rpcerror(StationId :: binary(), Error :: ocpp_error:error()) -> ok.
+rpcerror(StationId, Error) ->
+    gen_statem:cast(?registry(StationId), {rpcerror, Error}).
 
 -spec lookup_variable(StationId :: binary(),
                       ComponentName :: binary(),

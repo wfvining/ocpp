@@ -498,7 +498,7 @@ get_variables(Config) ->
                                                          component => #{name => <<"EVSE">>,
                                                                         evse => #{id => 1, connectorId => 1}},
                                                          variable => #{name => <<"Power">>}}]}),
-    ocpp_station:call(StationId, GetVariablesRequest),
+    ocpp_station:call_async(StationId, GetVariablesRequest),
     receive_ocpp(ocpp_message:id(GetVariablesRequest), rpccall,
                  fun(Msg) -> ocpp_message:request_type(Msg) =:= 'GetVariables' end),
     GetVariablesResponse =
@@ -539,7 +539,7 @@ set_variables(Config) ->
                                                                         evse => #{id => 1, connectorId => 1}},
                                                          variable => #{name => <<"Power">>},
                                                          attributeValue => <<"100">>}]}),
-    ocpp_station:call(StationId, SetVariablesRequest),
+    ocpp_station:call_async(StationId, SetVariablesRequest),
     receive_ocpp(ocpp_message:id(SetVariablesRequest), rpccall,
                  fun(Msg) -> ocpp_message:request_type(Msg) =:= 'SetVariables' end),
     SetVariablesResponse =
@@ -571,7 +571,7 @@ sync_call(Config) ->
                                                                         evse => #{id => 1, connectorId => 1}},
                                                          variable => #{name => <<"Power">>},
                                                          attributeValue => <<"100">>}]}),
-    ?assertExit({timeout, _}, ocpp_station:call_sync(StationId, SetVariablesRequest, 50)),
+    ?assertExit({timeout, _}, ocpp_station:call(StationId, SetVariablesRequest, 50)),
     SetVariablesResponse =
         ocpp_message:new_response(
           'SetVariables',
@@ -584,7 +584,7 @@ sync_call(Config) ->
                                     variable => #{name => <<"Power">>}}]},
           ocpp_message:id(SetVariablesRequest)),
     timer:apply_after(50, ocpp_station, rpcreply, [StationId, SetVariablesResponse]),
-    {ok, Response} = ocpp_station:call_sync(StationId, SetVariablesRequest, 200),
+    {ok, Response} = ocpp_station:call(StationId, SetVariablesRequest, 200),
     ?assertEqual(SetVariablesResponse, Response).
 
 pending_trigger_message() ->
@@ -600,7 +600,7 @@ pending_trigger_message(Config) ->
     ct:pal("first test passed"),
 
     TriggerMessage1 = ocpp_message:new_request('TriggerMessage', #{requestedMessage => <<"Heartbeat">>}),
-    ocpp_station:call(StationId, TriggerMessage1),
+    ocpp_station:call_async(StationId, TriggerMessage1),
     receive_ocpp(ocpp_message:id(TriggerMessage1), rpccall),
     ocpp_station:rpcreply(
       StationId,
@@ -613,7 +613,7 @@ pending_trigger_message(Config) ->
     ct:pal("second test passed"),
 
     TriggerMessage2 = ocpp_message:new_request('TriggerMessage', #{requestedMessage => <<"Heartbeat">>}),
-    ocpp_station:call(StationId, TriggerMessage2),
+    ocpp_station:call_async(StationId, TriggerMessage2),
     receive_ocpp(ocpp_message:id(TriggerMessage2), rpccall),
     ocpp_station:rpcreply(
       StationId,
@@ -669,7 +669,7 @@ solicit_base_report(StationId, Options) ->
     GetReport =
         ocpp_message:new_request(
           'GetBaseReport', #{requestId => ReqId, reportBase => <<"FullInventory">>}),
-    ok = ocpp_station:call(StationId, GetReport),
+    ok = ocpp_station:call_async(StationId, GetReport),
     receive_ocpp(ocpp_message:id(GetReport), rpccall,
                  fun (Msg) ->
                          (ocpp_message:request_type(Msg) =:= 'GetBaseReport')
