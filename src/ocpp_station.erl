@@ -445,8 +445,7 @@ handle_event(cast, {rpcreply, MsgType, MessageId, Message},
                 Data#data{pending_report = undefined,
                           expecting_report = [RequestId | Data#data.expecting_report],
                           pending_call = undefined};
-            Status ->
-                ocpp_handler:report_rejected(Data#data.stationid, RequestId, Status),
+            _ ->
                 Data#data{pending_report = undefined,
                           pending_call = undefined}
         end,
@@ -466,7 +465,6 @@ handle_event(cast, {rpcreply, 'TriggerMessage', MessageId, Message},
     {keep_state, NewData};
 handle_event(cast, {rpcreply, _MsgType, MessageId, Message},
              #data{pending_call = {TRef, MessageId}} = Data) ->
-    ocpp_handler:rpc_reply(Data#data.stationid, Message),
     timer:cancel(TRef),
     NewData = Data#data{pending_call = undefined, pending_report = undefined},
     {keep_state, clear_sync_call(MessageId, Message, NewData)};
@@ -547,7 +545,8 @@ clear_pending_request(Data) ->
 clear_sync_call(MesesageId, Message, #data{sync_call = {From, MessageId}} = Data) ->
     gen_statem:reply(From, {ok, Message}),
     Data#data{sync_call = undefined};
-clear_sync_call(_, _, Data) ->
+clear_sync_call(_, Message, Data) ->
+    ocpp_handler:rpc_reply(Data#data.stationid, Message),
     Data.
 
 component_options(Component) ->
