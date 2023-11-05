@@ -132,7 +132,7 @@ error(StationId, Error) ->
 %% @doc Notify the state machine that an RPCERROR has arrived.
 -spec rpcerror(StationId :: binary(), Error :: ocpp_error:error()) -> ok.
 rpcerror(StationId, Error) ->
-    gen_statem:cast(?registry(StationId), {rpcerror, Error}).
+    gen_statem:cast(?registry(StationId), {rpcerror, ocpp_error:id(Error), Error}).
 
 -spec lookup_variable(StationId :: binary(),
                       ComponentName :: binary(),
@@ -399,6 +399,12 @@ handle_event({call, From},
                 {error, undefined}
         end,
     {keep_state_and_data, [{reply, From, Reply}]};
+handle_event(cast, {rpcerror, MessageId, Error}, #data{pending_call = {TRef, MessageId}} = Data) ->
+    timer:cancel(TRef),
+    {keep_state, clear_sync_call(ocpp_error:id(Error), {error, Error}, Data)};
+handle_event(cast, {rpcerror, _, _}, _) ->
+    %% MessageId doesn't match the pending message, drop the error.
+    keep_state_and_data;
 handle_event(cast, {rpcreply, 'SetVariables', MessageId, Message},
              #data{pending_set_variables = {MessageId, PendingSetVariables},
                    device_model = DeviceModel} = Data) ->
@@ -435,7 +441,7 @@ handle_event(cast, {rpcreply, 'SetVariables', MessageId, Message},
         false ->
             ok %% nothing to do
     end,
-    {keep_state, clear_sync_call(MessageId, Message, Data)};
+    {keep_state, clear_sync_call(MessageId, {ok, Message}, Data)};
 handle_event(cast, {rpcreply, 'SetVariables', MessageId, _Message}, _Data) ->
     logger:notice("Dropping unexpected SetVariables reply with MessageId = ~p.", [MessageId]),
     keep_state_and_data;
@@ -443,7 +449,7 @@ handle_event(cast, {rpcreply, 'GetVariables', MessageId, Message}, Data) ->
     lists:foreach(
       fun (GetVariableResult) -> process_get_variable(GetVariableResult, Data) end,
       ocpp_message:get(<<"getVariableResult">>, Message)),
-    {keep_state, clear_sync_call(MessageId, Message, Data)};
+    {keep_state, clear_sync_call(MessageId, {ok, Message}, Data)};
 handle_event(cast, {rpcreply, MsgType, MessageId, Message},
              #data{pending_report = {MessageId, RequestId},
                    pending_call = {TRef, MessageId}} = Data)
@@ -460,7 +466,7 @@ handle_event(cast, {rpcreply, MsgType, MessageId, Message},
                 Data#data{pending_report = undefined,
                           pending_call = undefined}
         end,
-    {keep_state, clear_sync_call(MessageId, Message, NewData)};
+    {keep_state, clear_sync_call(MessageId, {ok, Message}, NewData)};
 handle_event(cast, {rpcreply, 'TriggerMessage', MessageId, Message},
              #data{expecting_message = {pending, Expected},
                    pending_call = {TRef, MessageId}} = Data) ->
@@ -478,7 +484,7 @@ handle_event(cast, {rpcreply, _MsgType, MessageId, Message},
              #data{pending_call = {TRef, MessageId}} = Data) ->
     timer:cancel(TRef),
     NewData = Data#data{pending_call = undefined, pending_report = undefined},
-    {keep_state, clear_sync_call(MessageId, Message, NewData)};
+    {keep_state, clear_sync_call(MessageId, {ok, Message}, NewData)};
 handle_event(cast, {rpcreply, _, _, _}, _) ->
     keep_state_and_data;
 handle_event(info, {call_timeout, MessageId},
@@ -553,10 +559,16 @@ cleanup_connection(#data{connection = {_, Ref}} = Data) ->
 clear_pending_request(Data) ->
     Data#data{pending = undefined}.
 
-clear_sync_call(MesesageId, Message, #data{sync_call = {From, MessageId}} = Data) ->
+clear_sync_call(MessageId, {error, Error}, #data{sync_call = {From, MessageId}} = Data) ->
+    gen_statem:reply(From, {error, Error}),
+    Data#data{sync_call = undefined};
+clear_sync_call(MessageId, {ok, Message}, #data{sync_call = {From, MessageId}} = Data) ->
     gen_statem:reply(From, {ok, Message}),
     Data#data{sync_call = undefined};
-clear_sync_call(_, Message, Data) ->
+clear_sync_call(_, {error, Error}, Data) ->
+    ocpp_handler:rpc_error(Data#data.stationid, Error),
+    Data;
+clear_sync_call(_, {ok, Message}, Data) ->
     ocpp_handler:rpc_reply(Data#data.stationid, Message),
     Data.
 

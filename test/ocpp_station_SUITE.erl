@@ -115,7 +115,8 @@ init_per_testcase(boot_accepted, Config) ->
     Config1;
 init_per_testcase(Case, Config)
   when Case =:= report_idle;
-       Case =:= sync_call ->
+       Case =:= sync_call;
+       Case =:= sync_call_error ->
     StationId = ?stationid(Case),
     Config1 = start_station(StationId, Config),
     ok = ocpp_station:connect(StationId),
@@ -159,6 +160,7 @@ end_per_testcase(TestCase, Config)
        TestCase =:= get_variables;
        TestCase =:= set_variables;
        TestCase =:= sync_call;
+       TestCase =:= sync_call_error;
        TestCase =:= pending_trigger_message ->
     Sup = ?config(stationsup, Config),
     unlink(Sup),
@@ -196,7 +198,8 @@ groups() ->
        multiple_reports,
        report_rejected,
        get_variables,
-       set_variables]}].
+       set_variables]},
+     {sync_call, [parallel], [sync_call, sync_call_error]}].
 
 %%--------------------------------------------------------------------
 %% @spec all() -> GroupsAndTestCases | {skip,Reason}
@@ -207,7 +210,7 @@ groups() ->
 %% @end
 %%--------------------------------------------------------------------
 all() ->
-    [{group, provisioning}, sync_call].
+    [{group, provisioning}, {group, sync_call}].
 
 boot() ->
     [{timetrap, 5000}].
@@ -586,6 +589,27 @@ sync_call(Config) ->
     timer:apply_after(50, ocpp_station, rpcreply, [StationId, SetVariablesResponse]),
     {ok, Response} = ocpp_station:call(StationId, SetVariablesRequest, 200),
     ?assertEqual(SetVariablesResponse, Response).
+
+sync_call_error() ->
+    [{doc, "A synchronous call that results in an error returns an error."},
+     {timetrap, 5000}].
+sync_call_error(Config) ->
+    StationId = ?config(stationid, Config),
+    SetVariablesRequest =
+        ocpp_message:new_request('SetVariables',
+                                 #{setVariableData => [#{component => #{name => <<"OCPPCommCtrlr">>},
+                                                         variable => #{name => <<"WebsocketPingInterval">>},
+                                                         attributeValue => <<"2">>},
+                                                       #{component => #{name => <<"EVSE">>,
+                                                                        evse => #{id => 1, connectorId => 1}},
+                                                         variable => #{name => <<"Power">>},
+                                                         attributeValue => <<"100">>}]}),
+    WrongError = ocpp_error:new('NotSupported', <<"wrong-message-id">>, []),
+    Error = ocpp_error:new('InternalError', ocpp_message:id(SetVariablesRequest), []),
+    timer:apply_after(25, ocpp_station, rpcerror, [StationId, WrongError]),
+    timer:apply_after(50, ocpp_station, rpcerror, [StationId, Error]),
+    {error, Reason} = ocpp_station:call(StationId, SetVariablesRequest, 200),
+    ?assertEqual(Error, Reason).
 
 pending_trigger_message() ->
     [{doc, "Certain messages can be triggered by the CSMS while the station is in the pending state"},

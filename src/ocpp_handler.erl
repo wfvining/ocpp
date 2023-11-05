@@ -25,7 +25,7 @@
          station_disconnected/1,
          station_ready/1]).
 %% OCPP events
--export([rpc_request/2, rpc_reply/2, report_rejected/3, report_received/2, reboot_required/1]).
+-export([rpc_request/2, rpc_reply/2, rpc_error/2, report_rejected/3, report_received/2, reboot_required/1]).
 %% gen_event callbacks
 -export([init/1, handle_event/2, handle_call/2]).
 
@@ -123,6 +123,10 @@ rpc_request(StationId, Request) ->
 -spec rpc_reply(StationId :: binary(), Reply :: ocpp_message:message()) -> ok.
 rpc_reply(StationId, Reply) ->
     gen_event:notify(?registry(StationId), {rpc_reply, Reply}).
+
+-spec rpc_error(StationId :: binary(), Error :: ocpp_error:error()) -> ok.
+rpc_error(StationId, Error) ->
+    gen_event:notify(?registry(StationId), {rpc_error, Error}).
 
 -spec station_connected(StationId :: binary()) -> ok.
 station_connected(StationId) ->
