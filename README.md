@@ -127,7 +127,7 @@ To handle a BootNotificationRequest, for example, you would implement
 ```erlang
 handle_ocpp('BootNotification', Msg, State) ->
     Response = #{
-        currentTime => "2023-10-08T19:41:33Z", %% TODO don't hardcode the time
+        currentTime => <<"2023-10-08T19:41:33Z">>, %% TODO don't hardcode the time
         status => <<"Accepted">>,
         interval => 3600
     }
