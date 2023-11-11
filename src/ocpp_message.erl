@@ -2,7 +2,8 @@
 
 -export([new_request/2, new_request/3, new_response/3,
          properties/1, get/2, get/3, id/1,
-         type/1, request_type/1, response_type/1]).
+         type/1, request_type/1, response_type/1,
+         to_map/1]).
 
 -type message_body() :: #{binary() | string() => jerk:primterm() | message_body()}
                       | [{binary() | string(), jerk:primterm() | message_body()}].
@@ -214,6 +215,10 @@ response_type(Message) ->
 type({_MessageId, Message}) ->
     Schema = jerk:id(Message),
     hd(lists:reverse(binary:split(Schema, <<":">>, [global]))).
+
+-spec to_map(Message :: message()) -> map().
+to_map({_MessageId, Message}) ->
+    jerk:to_map(Message).
 
 -spec get(Key :: binary(), Message :: message()) -> jerk:primterm() | jerk:jerkterm().
 get(Key, {MessageId, Message}) ->

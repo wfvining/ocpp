@@ -2,7 +2,7 @@
 [{<<"gproc">>,{pkg,<<"gproc">>,<<"0.9.1">>},0},
  {<<"jerk">>,
   {git,"https://github.com/wfvining/jerk",
-       {ref,"c71b4aecf2924d61822df8b5cc81dd22a4873e4e"}},
+       {ref,"ea02d777b6fe4fe339affd807dbc66470ff1b624"}},
   0},
  {<<"jesse">>,
   {git,"https://github.com/for-get/jesse",
