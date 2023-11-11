@@ -15,7 +15,7 @@ set_status_test_() ->
     EVSE = ocpp_evse:new(3),
     {inparallel,
      [[?_assertEqual(
-          if C =:= Connector -> Status; C =/= Connector -> 'Unavailable' end,
+          if C =:= Connector -> Status; C =/= Connector -> 'Available' end,
           ocpp_evse:status(ocpp_evse:set_status(EVSE, Connector, Status), C))
        || C <- [1, 2, 3]]
       || {Connector, Status} <- [{1, 'Available'},
