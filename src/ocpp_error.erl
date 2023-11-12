@@ -5,7 +5,7 @@
 
 -module(ocpp_error).
 
--export([new/2, new/3, id/1, code/1, description/1, details/1]).
+-export([new/2, new/3, id/1, type/1, code/1, description/1, details/1]).
 
 -export_type([code/0, error/0, jsonterm/0]).
 
@@ -58,9 +58,12 @@ new(Code, MessageId, Options) ->
 -spec id(error()) -> binary().
 id(#error{id = Id}) -> Id.
 
+-spec code(error()) -> code().
+code(#error{code = Code}) -> Code.
+
 %% @doc Return the error code.
--spec code(error()) -> binary().
-code(#error{code = Code}) -> atom_to_binary(Code).
+-spec type(error()) -> binary().
+type(#error{code = Code}) -> atom_to_binary(Code).
 
 %% @doc Return the error description. If one was not specified a
 %% default description from the OCPP standard is returned.

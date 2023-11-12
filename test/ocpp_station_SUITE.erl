@@ -249,7 +249,7 @@ message_before_boot(Config) ->
     HeartbeatMsg = ocpp_message:new_request('Heartbeat', #{}),
     ok = ocpp_station:rpccall(StationId, HeartbeatMsg),
     receive_ocpp(ocpp_message:id(HeartbeatMsg), rpcerror,
-                 fun(Msg) -> ocpp_error:code(Msg) =:= <<"SecurityError">> end).
+                 fun(Msg) -> ocpp_error:type(Msg) =:= <<"SecurityError">> end).
 
 boot_pending() ->
     [{"manipulate the station while in the pending state"},
@@ -262,7 +262,7 @@ boot_pending(Config) ->
     ok = ocpp_station:rpccall(StationId, HeartbeatMsg),
     receive_ocpp(
       ocpp_message:id(HeartbeatMsg), rpcerror,
-      fun(Msg) -> ocpp_error:code(Msg) =:= <<"SecurityError">> end),
+      fun(Msg) -> ocpp_error:type(Msg) =:= <<"SecurityError">> end),
 
     BootNotification =
         ocpp_message:new_request('BootNotification', ?BOOT_NOTIFICATION),
@@ -349,7 +349,7 @@ report_pending(Config) ->
             seqNo => 0}),
     ok = ocpp_station:rpccall(StationId, ReportNotification),
     receive_ocpp(ocpp_message:id(ReportNotification), rpcerror,
-                 fun(Msg) -> ocpp_error:code(Msg) =:= <<"SecurityError">> end),
+                 fun(Msg) -> ocpp_error:type(Msg) =:= <<"SecurityError">> end),
     solicit_base_report(StationId, [{requestid, 1}, {status, <<"Accepted">>}]),
     ok = ocpp_station:rpccall(StationId, ReportNotification),
     receive_ocpp(ocpp_message:id(ReportNotification), rpcreply,
@@ -379,7 +379,7 @@ report_pending(Config) ->
             seqNo => 2}),
     ok = ocpp_station:rpccall(StationId, ReportNotification2),
     receive_ocpp(ocpp_message:id(ReportNotification2), rpcerror,
-                 fun(Msg) -> ocpp_error:code(Msg) =:= <<"SecurityError">> end).
+                 fun(Msg) -> ocpp_error:type(Msg) =:= <<"SecurityError">> end).
 
 report_idle() ->
     [{doc, "can process reports in the idle state."},
@@ -480,7 +480,7 @@ report_rejected(Config) ->
           #{requestId => 1, generatedAt => ?nowutc, tbc => false, seqNo => 0}),
     ok = ocpp_station:rpccall(StationId, ReportNotification),
     receive_ocpp(ocpp_message:id(ReportNotification), rpcerror,
-                 fun(Msg) -> ocpp_error:code(Msg) =:= <<"SecurityError">> end).
+                 fun(Msg) -> ocpp_error:type(Msg) =:= <<"SecurityError">> end).
 
 get_variables() ->
     [{doc, "when variables are requested from a charging station the "
@@ -620,7 +620,7 @@ pending_trigger_message(Config) ->
     Heartbeat1 = ocpp_message:new_request('Heartbeat', #{}),
     ok = ocpp_station:rpccall(StationId, Heartbeat1),
     receive_ocpp(ocpp_message:id(Heartbeat1), rpcerror,
-                 fun(Msg) -> ocpp_error:code(Msg) =:= <<"SecurityError">> end),
+                 fun(Msg) -> ocpp_error:type(Msg) =:= <<"SecurityError">> end),
     ct:pal("first test passed"),
 
     TriggerMessage1 = ocpp_message:new_request('TriggerMessage', #{requestedMessage => <<"Heartbeat">>}),
@@ -633,7 +633,7 @@ pending_trigger_message(Config) ->
     Heartbeat2 = ocpp_message:new_request('Heartbeat', #{}),
     ok = ocpp_station:rpccall(StationId, Heartbeat2),
     receive_ocpp(ocpp_message:id(Heartbeat2), rpcerror,
-                 fun(Msg) -> ocpp_error:code(Msg) =:= <<"SecurityError">> end),
+                 fun(Msg) -> ocpp_error:type(Msg) =:= <<"SecurityError">> end),
     ct:pal("second test passed"),
 
     TriggerMessage2 = ocpp_message:new_request('TriggerMessage', #{requestedMessage => <<"Heartbeat">>}),
