@@ -73,7 +73,7 @@
              ReplyType :: callresult | callerror.
 %% Called when the response to an asynchronous RPCCALL is received.
 
--optional_callback([handle_async_reply/3]).
+-optional_callbacks([handle_async_reply/3]).
 
 -define(registry(Name), {via, gproc, ?name(Name)}).
 -define(name(Name), {n, l, {?MODULE, Name}}).
