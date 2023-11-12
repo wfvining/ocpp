@@ -4,39 +4,15 @@
 
 -module(ocpp_rpc).
 
--export([call/3, callerror/1, callerror/2, callresult/2, decode/1]).
+-export([call/3, encode_callerror/1, callresult/2, decode/1]).
 
--export_type([rpctype/0, rpcerror/0, constraint_violation/0,
-              message/0]).
+-export_type([rpctype/0, message/0]).
 
 -type rpctype() :: call
                  | callresult
                  | callerror.
 
--type message() :: {rpctype(), messageid(), ocpp_message:message()}.
-
--type constraint_violation() :: occurrence_violation
-                              | property_violation
-                              | type_violation.
-
--type payload_error() :: format_violation %% payload for `Action' syntactically incorrect
-                       | generic_error
-                       | internal_error
-                       | not_implemented
-                       | not_supported
-                       | protocol_error
-                       | security_error
-                       | constraint_violation().
-
--type framework_error() :: rpc_framework_error %% Not a valid RPC request
-                         | message_type_not_supported. %% Message type number not supported
-
--type rpcerror() :: payload_error()
-                  | framework_error().
-
--type decode_error() :: rpc_framework_error
-                      | {message_type_not_supported, MessageTypeId :: integer()}
-                      | {payload_error(), MessageId :: messageid()}.
+-type message() :: {rpctype(), messageid(), ocpp_message:messagetype(), ocpp_message:message()}.
 
 -type messageid() :: string() | binary().
 
@@ -50,42 +26,27 @@ call(MessageId, Action, Payload) ->
     {call, MessageId, Action, Payload}.
 
 %% @doc Construct an ocpp callerror from an error value returned by `decode/1'.
--spec callerror(Error :: decode_error()) -> binary().
-callerror(rpc_framework_error = Error) ->
-    callerror(Error, <<"-1">>);
-callerror({message_type_not_supported = Error, MessageType}) ->
-    make_callerror(
-      Error, <<"-1">>, <<"Message type not supported">>,
-      #{<<"MessageType">> => MessageType,
-        <<"SupportedMessageTypes">> => [messagetype_to_id(Type)
-                                        || Type <- [callerror, callresult, call]]});
-callerror({Error, MessageId}) ->
-    callerror(Error, MessageId).
-
-
-%% @doc Return an encoded RPC error message with the given error reason.
--spec callerror(Error :: rpcerror(), MessageId :: messageid()) -> binary().
-callerror(Error, MessageId) ->
-    CallError = make_callerror(Error, MessageId),
-    encode_json(CallError).
+-spec encode_callerror(Error :: ocpp_error:error()) -> binary().
+encode_callerror(Error) ->
+    encode_json(make_callerror(ocpp_error:code(Error),
+                               ocpp_error:id(Error),
+                               ocpp_error:description(Error),
+                               ocpp_error:details(Error))).
 
 -spec callresult(MessageId :: messageid(), Payload :: map()) -> binary().
 callresult(MessageId, Payload) ->
-    encode_json([messagetype_to_id(callresult), MessageId, Payload]).
-
-make_callerror(Error, MessageId) ->
-    make_callerror(Error, MessageId, <<"">>, #{}).
+    encode_json([?MESSAGE_TYPE_RESULT, MessageId, Payload]).
 
 make_callerror(Error, MessageId, ErrorDescription, ErrorDetails) ->
-    [messagetype_to_id(callerror),
+    [?MESSAGE_TYPE_ERROR,
      MessageId,
-     error_to_binary(Error),
+     atom_to_binary(Error),
      ErrorDescription,
      ErrorDetails].
 
 -spec decode(MessageBinary :: binary()) ->
           {ok, message()} |
-          {error, decode_error()}.
+          {error, ocpp_error:error()}.
 decode(MessageBinary) ->
     DecodePipeline =
         bind([fun parse_json/1,
@@ -99,41 +60,44 @@ decode(MessageBinary) ->
 make_message([call, MessageId, Action, Payload]) when is_binary(Action) ->
     case validate(<<Action/binary, "Request">>, Payload) of
         {ok, _Payload} ->
-            {ok, {call, MessageId, ocpp_message:request(Action, Payload)}};
+            {ok, {call, MessageId, ocpp_message:new_request(binary_to_atom(Action), Payload)}};
         {error, Reason} ->
-            {error, {Reason, MessageId}}
+            {error, ocpp_error:new(Reason, MessageId)}
     end;
+make_message([call, MessageId, _, _]) ->
+    {error, ocpp_error:new('RpcFrameworkError', MessageId)};
 make_message([callresult, MessageId, Payload]) ->
-    {ok, {response, MessageId, Payload}};
+    {ok, {callresult, MessageId, Payload}};
 make_message(_) ->
-    {error, rpc_framework_error}.
+    {error, ocpp_error:new('RpcFrameworkError', <<"-1">>)}.
 
 check_message_id([_, MessageId | _] = Msg) ->
     case catch string:length(MessageId) of
         {'EXIT', _} ->
-            {error, rpc_framework_error};
+            {error, ocpp_error:new('RpcFrameworkError', <<"-1">>)};
         N when N =< 36 ->
             {ok, Msg};
         N when N > 36 ->
-            {error, rpc_framework_error}
+            {error, ocpp_error:new('RpcFrameworkError', <<"-1">>)}
     end;
 check_message_id(_) ->
-    {error, rpc_framework_error}.
+    {error, ocpp_error:new('RpcFrameworkError', <<"-1">>)}.
 
 decode_message_type([MessageTypeId|Rest]) ->
     case id_to_messagetype(MessageTypeId) of
         {ok, MessageType} ->
             {ok, [MessageType | Rest]};
-        {error, _} = Error -> Error
+        {error, Reason} ->
+            {error, ocpp_error:new(Reason, <<"-1">>)}
     end;
 decode_message_type(_) ->
-    {error, rpc_framework_error}.
+    {error, ocpp_error:new('RpcFrameworkError', <<"-1">>)}.
 
 parse_json(Binary) ->
     try {ok, jiffy:decode(Binary, [return_maps])}
     catch
         error:_ ->
-            {error, rpc_framework_error}
+            {error, ocpp_error:new('RpcFrameworkError', <<"-1">>)}
     end.
 
 bind(Funs) ->
@@ -150,39 +114,22 @@ validate(Action, Payload) ->
         ok ->
             {ok, {Action, Payload}};
         {error, unknown_action} ->
-            {error, not_implemented};
+            {error, 'NotImplemented'};
         {error, invalid_payload} ->
-            {error, protocol_error};
+            {error, 'ProtocolError'};
         {error, bad_property} ->
-            {error, occurrence_violation};
+            {error, 'OccurrenceConstraintViolation'};
         {error, bad_type} ->
-            {error, type_violation};
+            {error, 'TypeConstraintViolation'};
         {error, bad_value} ->
-            {error, property_violation}
+            {error, 'PropertyConstraintViolation'}
     end.
 
 %%% Utility functions %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-messagetype_to_id(call) -> ?MESSAGE_TYPE_CALL;
-messagetype_to_id(callresult) -> ?MESSAGE_TYPE_RESULT;
-messagetype_to_id(callerror) -> ?MESSAGE_TYPE_ERROR.
 
 id_to_messagetype(?MESSAGE_TYPE_CALL) -> {ok, call};
 id_to_messagetype(?MESSAGE_TYPE_RESULT) -> {ok, callresult};
 id_to_messagetype(?MESSAGE_TYPE_ERROR) -> {ok, callerror};
 id_to_messagetype(MessageTypeId) when is_integer(MessageTypeId) ->
-    {error, {message_type_not_supported, MessageTypeId}};
-id_to_messagetype(_) -> {error, rpc_framework_error}.
-
-error_to_binary(format_violation) -> <<"FormatViolation">>;
-error_to_binary(generic_error) -> <<"GenericError">>;
-error_to_binary(internal_error) -> <<"InternalError">>;
-error_to_binary(not_implemented) -> <<"NotImplemented">>;
-error_to_binary(message_type_not_supported) -> <<"MessageTypeNotSupported">>;
-error_to_binary(not_supported) -> <<"NotSupported">>;
-error_to_binary(protocol_error) ->  <<"ProtocolError">>;
-error_to_binary(rpc_framework_error) -> <<"RpcFrameworkError">>;
-error_to_binary(security_error) -> <<"SecurityError">>;
-error_to_binary(occurrence_violation) -> <<"OccurrenceConstraintViolation">>;
-error_to_binary(property_violation) -> <<"PropertyConstraintViolation">>;
-error_to_binary(type_violation) -> <<"TypeConstraintViolation">>.
+    {error, 'MessageTypeNotSupported'};
+id_to_messagetype(_) -> {error, 'RpcFrameworkError'}.

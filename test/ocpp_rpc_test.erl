@@ -2,7 +2,6 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
--define(FRAMEWORK_ERROR, {error, rpc_framework_error}).
 -define(BOOT_NOTIFICATION_REQUEST,
         "{\"reason\": \"PowerUp\", \"chargingStation\": "
         "{\"model\": \"testModel\", \"vendor\": \"testVendor\"}}").
@@ -34,16 +33,16 @@ message_id_test() ->
 
 unknown_message_type_test_() ->
     {"decoding a message with type ID other than 2, 3, 4 "
-     "results in a message_type_not_supported error",
+     "results in a 'MessageTypeNotSupported' error",
      {inparallel,
       [?_assertEqual(
-          {error, {message_type_not_supported, 1}},
+          {error, ocpp_error:new('MessageTypeNotSupported', <<"-1">>)},
           ocpp_rpc:decode(<<"[1, true, false]">>)),
        ?_assertEqual(
-          {error, {message_type_not_supported, -1}},
+          {error, ocpp_error:new('MessageTypeNotSupported', <<"-1">>)},
           ocpp_rpc:decode(<<"[-1]">>)),
        ?_assertEqual(
-          {error, {message_type_not_supported, 5}},
+          {error, ocpp_error:new('MessageTypeNotSupported', <<"-1">>)},
           ocpp_rpc:decode(<<"[5, \"testid\", \"foo\", {}]">>))]}}.
 
 bad_ocpp_message_test_() ->
@@ -53,7 +52,7 @@ bad_ocpp_message_test_() ->
      {setup, fun init_schemas/0, fun(_) -> ok end,
       {inparallel,
        [?_assertEqual(
-           {error, {protocol_error, MessageID}},
+           {error, ocpp_error:new('ProtocolError', MessageID)},
            ocpp_rpc:decode(
              <<"[2, ",
                "\"", MessageID/binary, "\", ",
@@ -68,7 +67,7 @@ missing_property_test_() ->
      "results in an occurrence_violation",
      {setup, fun init_schemas/0, fun(_) -> ok end,
       [?_assertEqual(
-          {error, {occurrence_violation, ?MESSAGE_ID}},
+          {error, ocpp_error:new('OccurrenceConstraintViolation', ?MESSAGE_ID)},
           ocpp_rpc:decode(
             <<"[2, \"", MessageID/binary, "\", "
               "\"BootNotification\", {\"reason\": \"PowerUp\"}]">>))]}}.
@@ -79,7 +78,7 @@ extra_property_test_() ->
      "results in an occurrence_violation",
      {setup, fun init_schemas/0, fun(_) -> ok end,
       [?_assertEqual(
-          {error, {occurrence_violation, ?MESSAGE_ID}},
+          {error, ocpp_error:new('OccurrenceConstraintViolation', ?MESSAGE_ID)},
           ocpp_rpc:decode(
             <<"[2, \"", MessageID/binary, "\", "
               "\"BootNotification\", "
@@ -94,7 +93,7 @@ bad_property_test_() ->
      "invalid value results in a property_violation",
      {setup, fun init_schemas/0, fun(_) -> ok end,
       [?_assertEqual(
-          {error, {property_violation, ?MESSAGE_ID}},
+          {error, ocpp_error:new('PropertyConstraintViolation', ?MESSAGE_ID)},
           ocpp_rpc:decode(
             <<"[2, \"", MessageID/binary, "\", "
               "\"BootNotification\", "
@@ -109,7 +108,7 @@ bad_type_test_() ->
     {"invalid enum results in a type_violation",
      {setup, fun init_schemas/0, fun(_) -> ok end,
       [?_assertEqual(
-          {error, {type_violation, ?MESSAGE_ID}},
+          {error, ocpp_error:new('TypeConstraintViolation', ?MESSAGE_ID)},
           ocpp_rpc:decode(
             <<"[2, \"", MessageID/binary, "\", "
               "\"BootNotification\", "
@@ -117,7 +116,7 @@ bad_type_test_() ->
               "\"chargingStation\": "
               "{\"model\": \"foo\", \"vendorName\": \"bar\"}}]">>)),
        ?_assertEqual(
-          {error, {type_violation, ?MESSAGE_ID}},
+          {error, ocpp_error:new('TypeConstraintViolation', ?MESSAGE_ID)},
           ocpp_rpc:decode(
             <<"[2, \"", MessageID/binary, "\", "
               "\"BootNotification\", "
@@ -130,7 +129,7 @@ unknown_action_test_() ->
      "results in a not_implemented error",
      {setup, fun init_schemas/0, fun(_) -> ok end,
       ?_assertEqual(
-         {error, {not_implemented, MessageID}},
+         {error, ocpp_error:new('NotImplemented', MessageID)},
          ocpp_rpc:decode(
            <<"[2, \"", MessageID/binary, "\", ",
              "\"NoSuchAction\", {}]">>))}}.
@@ -141,13 +140,13 @@ init_schemas() ->
 
 bad_json() ->
     [?_assertEqual(
-        ?FRAMEWORK_ERROR,
+        {error, ocpp_error:new('RpcFrameworkError', <<"-1">>)},
         %% This JSON fails to parse because of a bad string
         ocpp_rpc:decode(<<"[2, \"αβ\", \"BootNotification\", ",
                           ?BOOT_NOTIFICATION_REQUEST, "]">>))].
 
 action_not_string() ->
-    ?_assertEqual(?FRAMEWORK_ERROR,
+    ?_assertEqual({error, ocpp_error:new('RpcFrameworkError', <<"testid">>)},
                   ocpp_rpc:decode(
                     list_to_binary(
                       "[2, \"testid\", 23, "?BOOT_NOTIFICATION_REQUEST"]"))).
@@ -155,13 +154,14 @@ action_not_string() ->
 message_id_too_long() ->
     {"MessageID must be less than 36 characters",
      [?_assertEqual(
-         ?FRAMEWORK_ERROR,
+         {error, ocpp_error:new('RpcFrameworkError', <<"-1">>)},
          ocpp_rpc:decode(
            <<"[2, \"abcdefghijklmnopqrstuvwxyzabcdeabcdeXXX\", \"BootNotification\"",
              ?BOOT_NOTIFICATION_REQUEST, "]">>))]}.
 
 message_id_not_string() ->
-    [?_assertEqual(?FRAMEWORK_ERROR, ocpp_rpc:decode(list_to_binary(Message)))
+    [?_assertEqual({error, ocpp_error:new('RpcFrameworkError', <<"-1">>)},
+                   ocpp_rpc:decode(list_to_binary(Message)))
      || Message <- ["[2, 42, \"BootNotification\", "
                     ?BOOT_NOTIFICATION_REQUEST "]",
                     "[3, true, {\"currentTime\": \"2013-02-01T20:53:32.486Z\","
@@ -170,17 +170,19 @@ message_id_not_string() ->
 
 typeid_not_int() ->
     Payload = "\"msgid\", \"BootNotification\", " ?BOOT_NOTIFICATION_REQUEST,
-    [?_assertEqual(?FRAMEWORK_ERROR, ocpp_rpc:decode(list_to_binary(Message)))
+    [?_assertEqual({error, ocpp_error:new('RpcFrameworkError', <<"-1">>)}, ocpp_rpc:decode(list_to_binary(Message)))
      || Message <- ["[1.4, " ++ Payload ++ "]",
                     "[true, " ++ Payload ++ "]",
                     "[\"\"," ++ Payload ++ "]"]].
 
 list_too_short() ->
-    [?_assertEqual(?FRAMEWORK_ERROR, ocpp_rpc:decode(list_to_binary(Message)))
+    [?_assertEqual({error, ocpp_error:new('RpcFrameworkError', <<"-1">>)},
+                   ocpp_rpc:decode(list_to_binary(Message)))
      || Message <- ["[]", "[2]", "[2, \"msgid\"]",
                     "[2, \"msgid\", \"BootRequest\"]",
                     "[3]", "[3, \"msgid\"]"]].
 
 not_list() ->
-    [?_assertEqual(?FRAMEWORK_ERROR, ocpp_rpc:decode(Message))
+    [?_assertEqual({error, ocpp_error:new('RpcFrameworkError', <<"-1">>)},
+                   ocpp_rpc:decode(Message))
      || Message <- [<<"1.2">>, <<"{\"foo\": 32}">>, <<"\"string\"">>]].
