@@ -70,7 +70,7 @@ decode(MessageBinary) ->
 make_message([call, MessageId, Action, Payload]) when is_binary(Action) ->
     case validate(<<Action/binary, "Request">>, Payload) of
         {ok, _Payload} ->
-            {ok, {call, MessageId, ocpp_message:new_request(binary_to_atom(Action), Payload)}};
+            {ok, {call, MessageId, ocpp_message:new_request(binary_to_atom(Action), Payload, MessageId)}};
         {error, Reason} ->
             {error, ocpp_error:new(Reason, MessageId)}
     end;
