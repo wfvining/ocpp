@@ -19,7 +19,7 @@ decode_framework_error_test_() ->
         action_not_string(),
         bad_json()]}}}.
 
-message_id_test() ->
+message_id_test_() ->
     {"MessageID can be exactly 36 characters",
      {setup,
       fun init_schemas/0,
