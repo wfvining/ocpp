@@ -137,14 +137,8 @@ unknown_action_test_() ->
 init_schemas() ->
     PrivDir = code:priv_dir(ocpp),
     SchemaDir = filename:join(PrivDir, "json_schemas"),
-    ocpp_schema:init_schemas(SchemaDir),
     application:ensure_all_started(jerk),
-    {ok, Files} = file:list_dir(SchemaDir),
-    SchemaFiles = lists:filter(
-                    fun(FileName) ->
-                            filename:extension(FileName) =:= ".json"
-                    end, Files),
-    [ok = jerk:load_schema(filename:join(SchemaDir, File)) || File <- SchemaFiles].
+    ocpp_schema:init_schemas(SchemaDir).
 
 bad_json() ->
     [?_assertEqual(
