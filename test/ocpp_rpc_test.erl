@@ -4,7 +4,7 @@
 
 -define(BOOT_NOTIFICATION_REQUEST,
         "{\"reason\": \"PowerUp\", \"chargingStation\": "
-        "{\"model\": \"testModel\", \"vendor\": \"testVendor\"}}").
+        "{\"model\": \"testModel\", \"vendorName\": \"testVendor\"}}").
 -define(MESSAGE_ID, atom_to_binary(?FUNCTION_NAME)).
 
 decode_framework_error_test_() ->
