@@ -4,7 +4,7 @@
 
 -module(ocpp_rpc).
 
--export([call/3, encode_callerror/1, encode_callresult/1, decode/1]).
+-export([call/3, encode_call/1, encode_callerror/1, encode_callresult/1, decode/1]).
 
 -export_type([rpctype/0, message/0]).
 
@@ -24,6 +24,14 @@
           message().
 call(MessageId, Action, Payload) ->
     {call, MessageId, Action, Payload}.
+
+%% @doc Construct a CALL  RPC request for a message.
+-spec encode_call(Message :: ocpp_message:message()) -> binary().
+encode_call(Message) ->
+    encode_json([?MESSAGE_TYPE_CALL,
+                 ocpp_message:id(Message),
+                 atom_to_binary(ocpp_message:request_type(Message)),
+                 ocpp_message:to_map(Message)]).
 
 %% @doc Construct an ocpp callerror from an error value returned by `decode/1'.
 -spec encode_callerror(Error :: ocpp_error:error()) -> binary().

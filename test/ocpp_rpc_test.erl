@@ -194,3 +194,13 @@ not_list() ->
     [?_assertEqual({error, ocpp_error:new('RpcFrameworkError', <<"-1">>)},
                    ocpp_rpc:decode(Message))
      || Message <- [<<"1.2">>, <<"{\"foo\": 32}">>, <<"\"string\"">>]].
+
+encode_call_test() ->
+    dbg:tracer(),
+    dbg:p(self(), c),
+    dbg:tp(ocpp_rpc, x),
+    RPCMsg = list_to_binary("[2,\"foo\",\"BootNotification\","?BOOT_NOTIFICATION_REQUEST"]"),
+    {ok, {call, _MessageID, Message}} = ocpp_rpc:decode(RPCMsg),
+    Encoded = ocpp_rpc:encode_call(Message),
+    {ok, {call, MessageID1, Message1}} = ocpp_rpc:decode(Encoded),
+    ?assertEqual(Message, Message1).
