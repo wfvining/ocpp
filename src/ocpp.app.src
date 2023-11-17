@@ -1,7 +1,7 @@
 {application, ocpp,
  [{description, "Open Charge Point Protocol server and client application."},
   {vsn, "0.1.0"},
-  {registered, [ocpp_sup, ocpp_csms, ocpp_station_supersup, ocpp_csms_sup, ocpp_manager]},
+  {registered, [ocpp_sup, ocpp_station_supersup, ocpp_manager]},
   {mod, {ocpp_app, []}},
   {applications,
    [kernel,
