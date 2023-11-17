@@ -27,10 +27,7 @@ start_link() ->
 %%                  modules => modules()}   % optional
 init([]) ->
     %% Initialize the schemas here so the top level supervisor owns the
-    %% ETS tables created by Jesse.
-    %%
-    %% TODO do this in whatever supervisor is responsible for starting
-    %%      the cowboy server.
+    %% ETS tables created by Jesse and Jerk.
     ok = ocpp_schema:init_schemas(
            filename:join(code:priv_dir(ocpp), "json_schemas")),
     SupFlags = #{strategy => one_for_all,

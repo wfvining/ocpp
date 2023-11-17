@@ -13,6 +13,9 @@
 
 -spec init_schemas(SchemaDir :: file:name()) -> ok | {error, Reason :: any()}.
 init_schemas(SchemaDir) ->
+    {ok, Files} = file:list_dir(SchemaDir),
+    SchemaFiles = [F || F <- Files, filename:extension(F) =:= ".json"],
+    [ok = jerk:load_schema(filename:join(SchemaDir, File)) || File <- SchemaFiles],
     jesse:load_schemas(SchemaDir, fun jiffy:decode/1).
 
 -spec validate(ActionName :: binary(), Payload :: jesse:json_term()) ->
