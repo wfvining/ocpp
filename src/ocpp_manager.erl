@@ -32,7 +32,7 @@ start_link() ->
 -spec add_station(StationName :: binary(),
                   NumEVSE :: pos_integer(),
                   HandlerCallbackModule :: module()) ->
-          {ok, StationManagerPid :: pid()} | {error, Reason :: any()}.
+          ok | {error, Reason :: any()}.
 add_station(StationName, NumEVSE, HandlerCallbackModule) ->
     gen_server:call(
       ?SERVER,
@@ -60,8 +60,8 @@ handle_call({add_station, {StationName, NumEVSE, HandlerCallbackModule}},
     case ocpp_station_supersup:start_station(StationName, NumEVSE)
     of
         {ok, _} ->
-            {reply, ok, State},
-            ocpp_station_manager:add_handler(StationName, HandlerCallbackModule);
+            ok = ocpp_station_manager:add_handler(StationName, HandlerCallbackModule),
+            {reply, ok, State};
         {error, _} = Error ->
             {reply, Error, State}
     end.

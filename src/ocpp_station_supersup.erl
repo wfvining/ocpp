@@ -28,19 +28,19 @@ init([]) ->
                     EVSE :: [ocpp_evse:evse()]) ->
           {ok, pid()} |
           {error, {already_started, pid()}}.
-start_station(StationId, NumEVSE) ->
+start_station(StationId, EVSE) ->
     case ocpp_station_manager:whereis(StationId) of
         undefined ->
-            do_start_station(StationId, NumEVSE);
+            do_start_station(StationId, EVSE);
         Pid when is_pid(Pid) ->
             {error, {already_started, Pid}}
     end.
 
-do_start_station(StationId, NumEVSE) ->
+do_start_station(StationId, EVSE) ->
     case supervisor:start_child(
-           ?SERVER, [StationId, NumEVSE])
+           ?SERVER, [StationId, EVSE])
     of
         {ok, _} = Ok -> Ok;
         {error, {shutdown, {failed_to_start_child, _, Err}}} ->
-            Err
+            {error, Err}
     end.
