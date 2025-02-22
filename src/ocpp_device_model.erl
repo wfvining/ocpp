@@ -6,7 +6,7 @@
 
 -feature(maybe_expr, enable).
 
--export([new/0, add_variable/5, add_attribute/8, get_value/5, update_attribute/6]).
+-export([new/0, add_variable/5, add_attribute/8, get_value/5, update_attribute/6, get_evse_availability/1]).
 
 -export_type([device_model/0, attribute/0, charactersitics/0,
               variable_identifiers/0, attribute_type/0]).
@@ -245,6 +245,13 @@ get_value(#device_model{attributes = Attributes},
         [] -> error(undefined);
         _ -> error(ambiguous)
     end.
+
+-spec get_evse_availability(DeviceModel :: device_model()) -> [{pos_integer(), string()}].
+get_evse_availability(#device_model{attributes = Attributes}) ->
+    Component = make_component_identifier(<<"EVSE">>, [{evse, '$1'}]),
+    Variable = make_variable_identifier(<<"AvailabilityState">>, []),
+    [{EVSE, Availability}
+     || [EVSE, Availability] <- ets:match(Attributes, {{Component, Variable, 'Actual'}, '$2', '_', '_'})].
 
 parse_value(_, undefined) ->
     undefined;

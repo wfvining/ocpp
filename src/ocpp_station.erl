@@ -645,9 +645,22 @@ process_report(ReportMsg, Data) ->
     if ToBeContinued ->
             Data;
        not ToBeContinued ->
+            NewData = update_evse_status(Data),
             ocpp_handler:report_received(Data#data.stationid, RequestId),
-            Data#data{expecting_report = lists:delete(RequestId, Data#data.expecting_report)}
+            NewData#data{expecting_report = lists:delete(RequestId, Data#data.expecting_report)}
     end.
+
+update_evse_status(Data) ->
+    NewEVSE = lists:foldl(
+                fun({EVSEId, Status}, Acc) ->
+                        maps:update_with(
+                          EVSEId,
+                          fun(EVSE) -> ocpp_evse:set_evse_status(EVSE, Status) end,
+                          Acc)
+                end,
+                Data#data.evse,
+                ocpp_device_model:get_evse_availability(Data#data.device_model)),
+    Data#data{evse = NewEVSE}.
 
 process_report_data(ReportData, DeviceModel) ->
     ComponentName = ocpp_message:get(<<"component/name">>, ReportData),
