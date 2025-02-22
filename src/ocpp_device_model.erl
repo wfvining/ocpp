@@ -211,7 +211,7 @@ make_variable_identifier(Name, Options) ->
 get_type(DeviceModel, ComponentName, VariableName, Options) ->
     case characteristics(DeviceModel, ComponentName, VariableName, Options) of
         {ok, Characteristics} ->
-            maps:get(datatype, Characteristics);
+            maps:get(datatype, Characteristics, <<"string">>);
         {error, Reason} -> error(Reason)
     end.
 

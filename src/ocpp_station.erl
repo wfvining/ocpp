@@ -720,11 +720,12 @@ update_status(Message, Data) ->
     end.
 
 load_attribute(Attr) ->
-    [{type, ocpp_message:get(<<"type">>, Attr, nil)},
-     {value, ocpp_message:get(<<"value">>, Attr, nil)},
-     {mutability, ocpp_message:get(<<"mutability">>, Attr, <<"ReadWrite">>)},
-     {persistent, ocpp_message:get(<<"persistent">>, Attr, false)},
-     {constant, ocpp_message:get(<<"constant">>, Attr, false)}].
+    [X || X = {_,Val} <- [{type, ocpp_message:get(<<"type">>, Attr, nil)},
+                          {value, ocpp_message:get(<<"value">>, Attr, nil)},
+                          {mutability, ocpp_message:get(<<"mutability">>, Attr, <<"ReadWrite">>)},
+                          {persistent, ocpp_message:get(<<"persistent">>, Attr, false)},
+                          {constant, ocpp_message:get(<<"constant">>, Attr, false)}],
+          Val =/= nil].
 
 report_attributes(Attrs) ->
     [load_attribute(Attr) || Attr <- Attrs].
@@ -744,7 +745,7 @@ report_variable_properties(ReportData) ->
     VariableInstance = ocpp_message:get(<<"variable/instance">>, ReportData, nil),
     Attributes = report_attributes(ocpp_message:get(<<"variableAttribute">>, ReportData)),
     Unit = ocpp_message:get(<<"variableCharacteristics/unit">>, ReportData, nil),
-    DataType = ocpp_message:get(<<"variableCharacteristics/dataType">>, ReportData),
+    DataType = ocpp_message:get(<<"variableCharacteristics/dataType">>, ReportData, nil),
     MinLimit = ocpp_message:get(<<"variableCharacteristics/minLimit">>, ReportData, nil),
     MaxLimit = ocpp_message:get(<<"variableCharacteristics/maxLimit">>, ReportData, nil),
     ValuesListCSV = ocpp_message:get(<<"variableCharacteristics/valuesList">>, ReportData, nil),
@@ -754,7 +755,7 @@ report_variable_properties(ReportData) ->
            ValuesListCSV =:= nil ->
                 nil
         end,
-    SuppportsMonitoring = ocpp_message:get(<<"variableCharacteristics/supportsMonitoring">>, ReportData),
+    SuppportsMonitoring = ocpp_message:get(<<"variableCharacteristics/supportsMonitoring">>, ReportData, nil),
     [if is_binary(Val) -> {Key, binary_to_list(Val)};
         true -> X
      end
