@@ -695,9 +695,12 @@ update_connector_status(EVSE, EVSEId, ConnectorId, Status) ->
               EVSE),
         {ok, NewEVSE}
     catch error:badconnector ->
-            {error, badconnector};
+            {ok, maps:put(EVSEId,
+                          ocpp_evse:add_connector(maps:get(EVSEId, EVSE), ConnectorId, Status),
+                          EVSE)};
           error:{badkey, _} ->
-            {error, badevse}
+            AddEVSE = ocpp_evse:set_status(ocpp_evse:new(ConnectorId), ConnectorId, Status),
+            {ok, maps:put(EVSEId, AddEVSE, EVSE)}
     end.
 
 update_status(Message, Data) ->
