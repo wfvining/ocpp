@@ -57,7 +57,8 @@ init([]) ->
           {stop, Reason :: term(), NewState :: term()}.
 handle_call({add_station, {StationName, NumEVSE, HandlerCallbackModule}},
             _From, State) ->
-    case ocpp_station_supersup:start_station(StationName, NumEVSE)
+    EVSE = [ocpp_evse:new(1) || _ <- lists:seq(1, NumEVSE)],
+    case ocpp_station_supersup:start_station(StationName, EVSE)
     of
         {ok, _} ->
             ok = ocpp_station_manager:add_handler(StationName, HandlerCallbackModule),
