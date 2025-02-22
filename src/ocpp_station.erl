@@ -304,6 +304,9 @@ provisioning(cast, disconnect, Data) ->
     %% The station has already been accepted here so transition is the
     %% same as for `idle'
     {next_state, offline, cleanup_connection(Data)};
+provisioning({call, From}, {send_request, Message, Timeout, Options}, Data) ->
+    {Reply, NewData} = call_station(Message, Data, Timeout),
+    {keep_state, sync_async_reply(From, Reply, Message, Options, NewData)};
 provisioning(EventType, Event, Data) ->
     handle_event(EventType, Event, Data).
 
