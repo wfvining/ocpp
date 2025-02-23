@@ -601,8 +601,14 @@ heartbeat_response(MessageId) ->
      MessageId).
 
 handle_rpccall(Message, Data) ->
-    ocpp_handler:rpc_request(Data#data.stationid, Message),
-    Data#data{pending = ocpp_message:id(Message)}.
+    case ocpp_message:request_type(Message) of
+        'Heartbeat' ->
+            send_response(heartbeat_response(ocpp_message:id(Message)), Data),
+            Data;
+        _ ->
+            ocpp_handler:rpc_request(Data#data.stationid, Message),
+            Data#data{pending = ocpp_message:id(Message)}
+    end.
 
 init_evse(EVSE) ->
     maps:from_list(lists:zip(lists:seq(1, length(EVSE)), EVSE)).
