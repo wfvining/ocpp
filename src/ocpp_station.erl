@@ -332,6 +332,19 @@ idle(cast, {rpccall, 'NotifyReport', MessageId, Message},
                ocpp_message:get(<<"seqNo">>, Message)]),
             keep_state_and_data
     end;
+idle(cast, {rpccall, 'StatusNotification', MessageId, Message}, Data) ->
+    case update_status(Message, Data) of
+        {ok, NewData} ->
+            Response =
+                ocpp_message:new_response('StatusNotification', #{}, MessageId),
+            send_response(Response, Data),
+            UpdatedData = NewData;
+        {error, _} ->
+            Response = ocpp_error:new('GenericError', MessageId),
+            send_error(Response, Data),
+            UpdatedData = Data
+    end,
+    {keep_state, UpdatedData};
 idle(cast, {rpccall, _, _, Message}, Data) ->
     NewData = handle_rpccall(Message, Data),
     {next_state, idle, NewData};
