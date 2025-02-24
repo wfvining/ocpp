@@ -402,6 +402,15 @@ handle_event({call, From},
                 {error, undefined}
         end,
     {keep_state_and_data, [{reply, From, Reply}]};
+handle_event(cast, {reply, Response}, #data{pending = PendingId} = Data) ->
+    case ocpp_message:id(Response) of
+        PendingId ->
+            send_response(Response, Data),
+            {keep_state, Data#data{pending = undefined}};
+        MessageId ->
+            logger:warning("Expecting response for ~p, go response for ~p", [PendingId, MessageId]),
+            keep_state_and_data
+    end;
 handle_event(cast, {rpcerror, MessageId, Error}, #data{pending_call = {TRef, MessageId}} = Data) ->
     timer:cancel(TRef),
     {keep_state, clear_sync_call(ocpp_error:id(Error), {error, Error}, Data)};
